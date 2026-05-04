@@ -1,11 +1,14 @@
-import { useRef, useState, useCallback } from 'react';
+import { useRef, useState, useCallback, useEffect } from 'react';
 import Webcam from 'react-webcam';
 import axios from 'axios';
 import {
-  Camera, RefreshCw, UploadCloud, ShieldCheck, AlertCircle,
+  Camera, RefreshCw, ShieldCheck, AlertCircle,
   Fingerprint, Mail, Phone, Building2, BadgeCheck, XCircle,
-  CheckCircle2, Clock, LogIn, LogOut
+  CheckCircle2, Clock, LogIn, LogOut, ScanFace, UserCheck,
+  Eye, ArrowLeft, ArrowRight
 } from 'lucide-react';
+
+const BACKEND_API_BASE_URL = 'http://localhost:5000';
 
 const AIConfig = () => {
   const webcamRef = useRef(null);
@@ -17,15 +20,24 @@ const AIConfig = () => {
   const [actionResult, setActionResult] = useState(null);
   const [error, setError] = useState(null);
 
+  // Trạng thái thử thách người thật (Liveness Challenge)
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [challengePassed, setChallengePassed] = useState(false);
+  const [challengeIndex, setChallengeIndex] = useState(0);
+  const [challengeStatus, setChallengeStatus] = useState('WAITING'); // 'WAITING', 'PROCESSING', 'SUCCESS'
+  
+  // Chỉ giữ lại 3 bước: Chớp mắt, Trái, Phải
+  const challenges = [
+    { id: 'BLINK', label: 'Vui lòng chớp mắt', icon: <Eye className="text-blue-500" /> },
+    { id: 'LEFT', label: 'Quay mặt sang TRÁI', icon: <ArrowLeft className="text-blue-500" /> },
+    { id: 'RIGHT', label: 'Quay mặt sang PHẢI', icon: <ArrowRight className="text-blue-500" /> },
+  ];
+
   // Hàm phát thông báo bằng giọng nói (Tiếng Việt)
   const speak = (text) => {
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'vi-VN';
-
-    // Lấy danh sách tất cả các giọng nói có sẵn trên trình duyệt
     const voices = window.speechSynthesis.getVoices();
-
-    // Tìm giọng nữ Tiếng Việt (thường chứa các từ khóa như HoaiMy, Google, female, hoặc Linh)
     const femaleVoice = voices.find(voice =>
       voice.lang.includes('vi') &&
       (voice.name.toLowerCase().includes('female') ||
@@ -33,34 +45,31 @@ const AIConfig = () => {
         voice.name.toLowerCase().includes('linh') ||
         voice.name.toLowerCase().includes('google'))
     );
-
-    if (femaleVoice) {
-      utterance.voice = femaleVoice;
-    }
-
-    // Điều chỉnh cao độ (pitch) và tốc độ (rate) để giọng nghe nữ tính và dễ nghe hơn
-    utterance.pitch = 1.1; // Tăng nhẹ cao độ
-    utterance.rate = 1.0;  // Tốc độ nói bình thường
-
+    if (femaleVoice) utterance.voice = femaleVoice;
+    utterance.pitch = 1.1;
+    utterance.rate = 1.0;
     window.speechSynthesis.speak(utterance);
   };
 
-  // Khi đổi chế độ → reset kết quả
   const switchMode = (m) => {
     setMode(m);
-    setAiResult(null);
-    setMatchResult(null);
-    setActionResult(null);
-    setError(null);
+    resetAll();
   };
 
   const capture = useCallback(async () => {
+    if (!challengePassed) {
+      startLivenessChallenge();
+      return;
+    }
+    
     const imageSrc = webcamRef.current?.getScreenshot({ width: 640, height: 480 });
     if (!imageSrc) return;
+    
     setIsProcessing(true);
+    setError(null);
+
     try {
-      // Gộp 2 bước thành 1 để giảm độ trễ mạng (quan trọng cho mobile)
-      const idRes = await axios.post('http://localhost:5000/api/face/quick-scan', { image_base64: imageSrc });
+      const idRes = await axios.post(`${BACKEND_API_BASE_URL}/api/face/quick-scan`, { image_base64: imageSrc });
 
       if (idRes.data.aiData) setAiResult(idRes.data.aiData);
       setMatchResult(idRes.data);
@@ -70,10 +79,9 @@ const AIConfig = () => {
         return;
       }
 
-      // Tự động thực hiện điểm danh nếu nhận diện thành công
       if (idRes.data.employee?.id) {
         setIsActing(true);
-        const endpoint = mode === 'IN' ? 'http://localhost:5000/api/attendance/checkin' : 'http://localhost:5000/api/attendance/checkout';
+        const endpoint = mode === 'IN' ? `${BACKEND_API_BASE_URL}/api/attendance/checkin` : `${BACKEND_API_BASE_URL}/api/attendance/checkout`;
         const actionRes = await axios.post(endpoint, {
           employeeId: idRes.data.employee.id,
           confidenceScore: idRes.data.confidence / 100,
@@ -81,14 +89,12 @@ const AIConfig = () => {
         });
         setActionResult({ ...actionRes.data, mode });
 
-        // Phát thông báo chào mừng tự động
         const employeeName = idRes.data.employee.fullName;
         const message = mode === 'IN'
           ? `Chào mừng ${employeeName} đã vào ca.`
           : `Cảm ơn ${employeeName}, hẹn gặp lại bạn.`;
         speak(message);
 
-        // Tự động reset trạng thái sau 7 giây để sẵn sàng cho lượt quét tiếp theo
         setTimeout(() => resetAll(), 7000);
       }
     } catch (err) {
@@ -96,34 +102,100 @@ const AIConfig = () => {
     } finally {
       setIsProcessing(false);
       setIsActing(false);
+      setIsVerifying(false);
+      setChallengeIndex(0);
+      setChallengePassed(false);
     }
-  }, [webcamRef, mode]);
+  }, [webcamRef, mode, challengePassed]);
 
-  // Xử lý vào ca / ra ca
+  useEffect(() => {
+    if (challengePassed) {
+      capture();
+    }
+  }, [challengePassed, capture]);
+
+  const startLivenessChallenge = async () => {
+    setIsVerifying(true);
+    setChallengePassed(false);
+    setChallengeIndex(0);
+    setChallengeStatus('WAITING');
+    setError(null);
+    
+    let currentStep = 0;
+    const maxSteps = challenges.length;
+    
+    const runStep = async () => {
+      if (currentStep >= maxSteps) {
+        setChallengePassed(true);
+        setIsVerifying(false);
+        return;
+      }
+      
+      setChallengeIndex(currentStep);
+      setChallengeStatus('WAITING');
+      speak(challenges[currentStep].label);
+      
+      await new Promise(r => setTimeout(r, 1200));
+      setChallengeStatus('PROCESSING');
+      
+      let attempts = 0;
+      const checkInterval = setInterval(async () => {
+        attempts++;
+        if (attempts > 50) {
+          clearInterval(checkInterval);
+          setIsVerifying(false);
+          setError(`Không nhận diện được hành động: ${challenges[currentStep].label}. Vui lòng thử lại.`);
+          return;
+        }
+        
+        const frame = webcamRef.current?.getScreenshot({ width: 320, height: 240 });
+        if (!frame) return;
+        
+        try {
+          const res = await axios.post(`${BACKEND_API_BASE_URL}/api/v1/liveness-check`, { image_base64: frame });
+          const { face_detected, pose, eyes } = res.data;
+          
+          if (!face_detected) return;
+          
+          let passed = false;
+          const target = challenges[currentStep].id;
+          if (target === 'BLINK') {
+            if (eyes === 'CLOSED') passed = true; 
+          } else {
+            if (pose === target) passed = true;
+          }
+          
+          if (passed) {
+            clearInterval(checkInterval);
+            setChallengeStatus('SUCCESS');
+            currentStep++;
+            setTimeout(runStep, 1000);
+          }
+        } catch (err) {
+          console.error("Liveness error:", err);
+        }
+      }, 300);
+    };
+    
+    runStep();
+  };
+
   const handleAction = async () => {
     if (!matchResult?.employee?.id) return;
     setIsActing(true);
     setActionResult(null);
     try {
-      const endpoint = mode === 'IN' ? 'http://localhost:5000/api/attendance/checkin' : 'http://localhost:5000/api/attendance/checkout';
+      const endpoint = mode === 'IN' ? `${BACKEND_API_BASE_URL}/api/attendance/checkin` : `${BACKEND_API_BASE_URL}/api/attendance/checkout`;
       const res = await axios.post(endpoint, {
         employeeId: matchResult.employee.id,
         confidenceScore: matchResult.confidence / 100,
         type: mode
       });
       setActionResult({ ...res.data, mode });
-
-      // Phát thông báo chào mừng khi nhấn xác nhận thủ công
       const employeeName = matchResult.employee.fullName;
-      const message = mode === 'IN'
-        ? `Chào mừng ${employeeName} đã vào ca.`
-        : `Cảm ơn ${employeeName}, hẹn gặp lại bạn.`;
+      const message = mode === 'IN' ? `Chào mừng ${employeeName} đã vào ca.` : `Cảm ơn ${employeeName}, hẹn gặp lại bạn.`;
       speak(message);
-
-      // Tự động reset trạng thái sau 7 giây để người tiếp theo có thể quét
-      setTimeout(() => {
-        resetAll();
-      }, 7000);
+      setTimeout(() => resetAll(), 7000);
     } catch (err) {
       setError(err.response?.data?.error || `Lỗi khi ${mode === 'IN' ? 'vào ca' : 'ra ca'}`);
     } finally {
@@ -131,232 +203,104 @@ const AIConfig = () => {
     }
   };
 
-  const resetAll = () => { setAiResult(null); setMatchResult(null); setActionResult(null); setError(null); };
+  const resetAll = () => { 
+    setAiResult(null); setMatchResult(null); setActionResult(null); setError(null); 
+    setIsVerifying(false); setChallengeIndex(0); setChallengePassed(false);
+  };
 
   const isIN = mode === 'IN';
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      {/* Tiêu đề + Toggle chế độ */}
       <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Điểm danh Camera AI</h2>
-          <p className="text-slate-500 mt-1">Sử dụng nhận diện khuôn mặt để điểm danh vào/ra ca.</p>
+          <p className="text-slate-500 mt-1">Xác thực người thật 3 bước (Chớp mắt, Trái, Phải).</p>
         </div>
 
-        {/* Toggle Vào ca / Ra ca */}
         <div className="flex bg-slate-100 p-1.5 rounded-2xl gap-1 shadow-inner">
-          <button
-            onClick={() => switchMode('IN')}
-            className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${isIN ? 'bg-blue-600 text-white shadow-md shadow-blue-200' : 'text-slate-500 hover:text-slate-700'
-              }`}
-          >
-            <LogIn size={16} /> Vào ca (Check-in)
+          <button onClick={() => switchMode('IN')} className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${isIN ? 'bg-blue-600 text-white shadow-md shadow-blue-200' : 'text-slate-500 hover:text-slate-700'}`}>
+            <LogIn size={16} /> Vào ca
           </button>
-          <button
-            onClick={() => switchMode('OUT')}
-            className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${!isIN ? 'bg-emerald-600 text-white shadow-md shadow-emerald-200' : 'text-slate-500 hover:text-slate-700'
-              }`}
-          >
-            <LogOut size={16} /> Ra ca (Check-out)
+          <button onClick={() => switchMode('OUT')} className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${!isIN ? 'bg-emerald-600 text-white shadow-md shadow-emerald-200' : 'text-slate-500 hover:text-slate-700'}`}>
+            <LogOut size={16} /> Ra ca
           </button>
         </div>
-      </div>
-
-      {/* Banner chế độ hiện tại */}
-      <div className={`flex items-center gap-3 p-3 rounded-xl border font-medium text-sm ${isIN ? 'bg-blue-50 border-blue-200 text-blue-800' : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}>
-        {isIN ? <LogIn size={18} /> : <LogOut size={18} />}
-        <span>Chế độ hiện tại: <b>{isIN ? 'VÀO CA — Check-in' : 'RA CA — Check-out'}</b></span>
-        <span className={`ml-auto text-xs font-bold px-2 py-0.5 rounded-full ${isIN ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
-          {isIN ? 'Ghi nhận giờ đến' : 'Ghi nhận giờ về + tính giờ làm'}
-        </span>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* ─── Camera ─── */}
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold text-slate-900 flex items-center gap-2">
-              <Camera size={18} className="text-blue-600" /> Luồng camera trực tiếp
+              <Camera size={18} className="text-blue-600" /> Camera xác thực
             </h3>
             <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded-full tracking-wide flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> TRỰC TIẾP
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> BẢO MẬT CAO
             </span>
           </div>
 
           <div className="relative rounded-xl overflow-hidden bg-slate-900 aspect-video flex items-center justify-center">
-            <Webcam
-              audio={false}
-              ref={webcamRef}
-              screenshotFormat="image/jpeg"
-              screenshotQuality={0.8}
-              videoConstraints={{
-                width: 640,
-                height: 480,
-                facingMode: 'user'
-              }}
-              className="w-full h-full object-cover"
-            />
+            <Webcam audio={false} ref={webcamRef} screenshotFormat="image/jpeg" screenshotQuality={0.8} videoConstraints={{ width: 640, height: 480, facingMode: 'user' }} className="w-full h-full object-cover" />
 
-            {isProcessing && (
-              <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm flex flex-col items-center justify-center text-white">
-                <RefreshCw size={32} className="animate-spin text-blue-400 mb-3" />
-                <p className="font-semibold text-sm tracking-wide">ĐANG NHẬN DIỆN...</p>
-                <p className="text-xs text-slate-300 mt-1">DeepFace · Facenet · Cosine Match</p>
+            {isVerifying && (
+              <div className="absolute inset-0 bg-slate-900/70 backdrop-blur-md flex flex-col items-center justify-center text-white z-30 p-6 text-center">
+                <div className="w-20 h-20 bg-white/10 rounded-full flex items-center justify-center mb-6 relative animate-pulse">
+                   <div className="absolute inset-0 border-4 border-blue-500 rounded-full animate-ping"></div>
+                   {challenges[challengeIndex].icon}
+                </div>
+                <h4 className="text-xl font-bold mb-2">{challenges[challengeIndex].label}</h4>
+                <p className="text-blue-300 text-sm font-medium">BƯỚC {challengeIndex + 1}/{challenges.length}</p>
+                <div className="mt-8 w-full max-w-[200px] h-1.5 bg-white/20 rounded-full overflow-hidden">
+                   <div className="h-full bg-blue-500 transition-all duration-500" style={{ width: `${((challengeIndex + (challengeStatus === 'SUCCESS' ? 1 : 0)) / challenges.length) * 100}%` }} />
+                </div>
               </div>
             )}
 
-            {!isProcessing && (
-              <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                <div className={`w-48 h-48 border-2 border-dashed rounded-xl relative ${isIN ? 'border-blue-500/50' : 'border-emerald-500/50'}`}>
-                  <div className={`absolute top-0 left-0 w-4 h-4 border-t-4 border-l-4 rounded-tl-lg ${isIN ? 'border-blue-500' : 'border-emerald-500'}`}></div>
-                  <div className={`absolute top-0 right-0 w-4 h-4 border-t-4 border-r-4 rounded-tr-lg ${isIN ? 'border-blue-500' : 'border-emerald-500'}`}></div>
-                  <div className={`absolute bottom-0 left-0 w-4 h-4 border-b-4 border-l-4 rounded-bl-lg ${isIN ? 'border-blue-500' : 'border-emerald-500'}`}></div>
-                  <div className={`absolute bottom-0 right-0 w-4 h-4 border-b-4 border-r-4 rounded-br-lg ${isIN ? 'border-blue-500' : 'border-emerald-500'}`}></div>
+            {isProcessing && (
+              <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-md flex flex-col items-center justify-center text-white z-40">
+                <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+                <p className="font-bold text-lg text-blue-400">ĐÃ LẤY HÌNH ẢNH!</p>
+                <p className="text-sm text-slate-300">Đang nhận diện nhân viên...</p>
+              </div>
+            )}
+
+            {!isVerifying && !isProcessing && (
+              <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
+                <div className="relative w-64 h-80 border-2 border-white/20 rounded-[3rem] shadow-[0_0_0_9999px_rgba(0,0,0,0.4)] flex items-center justify-center overflow-hidden">
+                   <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-blue-400 to-transparent shadow-[0_0_15px_rgba(59,130,246,0.8)] animate-scan-line z-10"></div>
+                   <div className="absolute bottom-12 text-[10px] text-white/60 font-bold tracking-widest uppercase bg-black/40 px-3 py-1 rounded-full backdrop-blur-sm">Đặt khuôn mặt vào khung</div>
                 </div>
               </div>
             )}
           </div>
 
           <div className="mt-4 flex gap-3">
-            <button onClick={capture} disabled={isProcessing}
-              className={`flex-1 text-white font-medium py-3 rounded-xl transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 ${isIN ? 'bg-blue-700 hover:bg-blue-800 shadow-blue-200' : 'bg-emerald-700 hover:bg-emerald-800 shadow-emerald-200'}`}>
-              <UploadCloud size={18} />
-              {isProcessing ? 'Đang xử lý...' : 'Chụp & Nhận diện'}
+            <button onClick={capture} disabled={isProcessing || isVerifying} className={`flex-1 text-white font-bold py-4 rounded-2xl transition-all shadow-lg active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-3 ${isIN ? 'bg-gradient-to-r from-blue-600 to-blue-800' : 'bg-gradient-to-r from-emerald-600 to-emerald-800'}`}>
+              <ScanFace size={22} /> {isVerifying ? 'Đang xác thực...' : 'Bắt đầu điểm danh'}
             </button>
-            {(aiResult || matchResult || error) && (
-              <button onClick={resetAll} className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-sm font-medium transition-colors">
-                Làm mới
-              </button>
-            )}
           </div>
         </div>
 
-        {/* ─── Kết quả ─── */}
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col">
-          <h3 className="font-semibold text-slate-900 mb-4 border-b border-slate-100 pb-3">Kết quả nhận diện</h3>
-
-          <div className="flex-1 flex flex-col gap-4">
-            {/* Lỗi */}
-            {error && (
-              <div className="bg-red-50 text-red-700 p-4 rounded-xl border border-red-100 flex items-start gap-3">
-                <AlertCircle size={20} className="shrink-0 mt-0.5" />
-                <div><h4 className="font-semibold text-sm">Thất bại</h4><p className="text-xs mt-1 text-red-600">{error}</p></div>
-              </div>
-            )}
-
-            {/* Khuôn mặt phát hiện */}
-            {aiResult && (
-              <div className="bg-emerald-50 p-3 rounded-xl border border-emerald-100 flex items-center gap-3">
-                <ShieldCheck size={18} className="text-emerald-600 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-bold text-emerald-800">Khuôn mặt được phát hiện</p>
-                  <p className="text-[11px] text-emerald-600 mt-0.5">Model: Facenet · Độ tin cậy: {((aiResult.confidence || 0.98) * 100).toFixed(1)}% · Vector: 512D</p>
-                </div>
-              </div>
-            )}
-
-            {/* Kết quả vào/ra ca */}
+          <h3 className="font-semibold text-slate-900 mb-4 border-b border-slate-100 pb-3">Thông tin nhận diện</h3>
+          <div className="flex-1">
+            {error && <div className="bg-red-50 text-red-700 p-4 rounded-xl border border-red-100 flex items-start gap-3 mb-4"><AlertCircle size={20} className="shrink-0" /><div><h4 className="font-semibold text-sm">Lỗi</h4><p className="text-xs mt-1">{error}</p></div></div>}
             {actionResult && (
               <div className={`p-4 rounded-xl border flex items-start gap-3 ${actionResult.mode === 'IN' ? 'bg-blue-50 border-blue-200' : 'bg-emerald-50 border-emerald-200'}`}>
-                {actionResult.mode === 'IN' ? <LogIn size={20} className="text-blue-600 shrink-0 mt-0.5" /> : <LogOut size={20} className="text-emerald-600 shrink-0 mt-0.5" />}
-                <div>
-                  <h4 className={`font-semibold text-sm ${actionResult.mode === 'IN' ? 'text-blue-900' : 'text-emerald-900'}`}>
-                    ✅ {actionResult.message}
-                  </h4>
-                  <p className={`text-xs mt-1 ${actionResult.mode === 'IN' ? 'text-blue-700' : 'text-emerald-700'}`}>
-                    {new Date(actionResult.log?.checkTime).toLocaleTimeString('vi-VN')}
-                    {actionResult.mode === 'IN' && actionResult.log && (
-                      <> · {actionResult.log.isLate ? <span className="text-orange-600 font-semibold"> Đến trễ</span> : <span className="text-emerald-600 font-semibold"> Đúng giờ</span>}</>
-                    )}
-                    {actionResult.mode === 'OUT' && actionResult.log?.workHours && (
-                      <> · <span className="font-semibold">Đã làm: {actionResult.log.workHours} giờ</span></>
-                    )}
-                  </p>
-                </div>
+                {actionResult.mode === 'IN' ? <LogIn size={20} className="text-blue-600" /> : <LogOut size={20} className="text-emerald-600" />}
+                <div><h4 className="font-semibold text-sm text-slate-900">{actionResult.message}</h4><p className="text-xs text-slate-500 mt-1">{new Date(actionResult.log?.checkTime).toLocaleTimeString('vi-VN')}</p></div>
               </div>
             )}
-
-            {/* Card nhân viên khớp */}
-            {matchResult && matchResult.matched && matchResult.employee && !actionResult && (
-              <div className="border border-blue-100 rounded-2xl overflow-hidden bg-gradient-to-br from-blue-50 to-slate-50">
-                <div className={`h-1 bg-gradient-to-r ${isIN ? 'from-blue-500 to-indigo-500' : 'from-emerald-500 to-teal-500'}`} />
-                <div className="p-5">
-                  <div className="flex items-center gap-4 mb-5">
-                    {matchResult.employee.avatarUrl ? (
-                      <img src={matchResult.employee.avatarUrl} alt={matchResult.employee.fullName} className="w-16 h-16 rounded-2xl object-cover border-2 border-blue-200 shadow-sm" />
-                    ) : (
-                      <div className="w-16 h-16 rounded-2xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-xl border-2 border-blue-200 shadow-sm">
-                        {matchResult.employee.fullName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()}
-                      </div>
-                    )}
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-lg font-bold text-slate-900">{matchResult.employee.fullName}</span>
-                        <BadgeCheck size={16} className="text-blue-500 shrink-0" />
-                      </div>
-                      <span className="inline-flex items-center gap-1 bg-blue-100 text-blue-700 text-[11px] font-bold px-2 py-0.5 rounded-full">
-                        MNV: {matchResult.employee.employeeCode}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2.5 mb-4">
-                    {matchResult.employee.email && (
-                      <div className="flex items-center gap-3 text-sm">
-                        <div className="w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-400 shrink-0"><Mail size={14} /></div>
-                        <span className="text-slate-700 truncate">{matchResult.employee.email}</span>
-                      </div>
-                    )}
-                    <div className="flex items-center gap-3 text-sm">
-                      <div className="w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-400 shrink-0"><Building2 size={14} /></div>
-                      <span className="text-slate-700">{matchResult.employee.department}</span>
-                    </div>
-                  </div>
-
-                  <div className="mb-4 p-3 bg-white rounded-xl border border-slate-200 flex items-center justify-between shadow-sm">
-                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Độ khớp</span>
-                    <div className="flex items-center gap-2">
-                      <div className="w-24 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                        <div className={`h-full rounded-full transition-all duration-700 ${isIN ? 'bg-gradient-to-r from-blue-400 to-blue-600' : 'bg-gradient-to-r from-emerald-400 to-emerald-600'}`} style={{ width: `${matchResult.confidence}%` }} />
-                      </div>
-                      <span className={`text-sm font-bold ${isIN ? 'text-blue-700' : 'text-emerald-700'}`}>{matchResult.confidence}%</span>
-                    </div>
-                  </div>
-
-                  {/* NÚT VÀO CA / RA CA */}
-                  <button onClick={handleAction} disabled={isActing}
-                    className={`w-full py-3 text-white font-semibold rounded-xl transition-colors shadow-sm disabled:opacity-60 flex items-center justify-center gap-2 ${isIN ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-200' : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200'}`}>
-                    {isActing
-                      ? <><RefreshCw size={16} className="animate-spin" /> Đang xử lý...</>
-                      : isIN
-                        ? <><LogIn size={16} /> Xác nhận Vào ca (Check-in)</>
-                        : <><LogOut size={16} /> Xác nhận Ra ca (Check-out)</>
-                    }
-                  </button>
-                </div>
+            {matchResult?.matched && !actionResult && (
+              <div className="border border-blue-100 rounded-2xl p-5 bg-slate-50 flex flex-col items-center">
+                 {matchResult.employee.avatarUrl ? <img src={matchResult.employee.avatarUrl} className="w-20 h-20 rounded-2xl object-cover mb-3" /> : <div className="w-20 h-20 rounded-2xl bg-blue-100 flex items-center justify-center font-bold text-2xl text-blue-700 mb-3">{matchResult.employee.fullName[0]}</div>}
+                 <h4 className="text-lg font-bold text-slate-900">{matchResult.employee.fullName}</h4>
+                 <p className="text-sm text-slate-500 mb-4">{matchResult.employee.department}</p>
+                 <button onClick={handleAction} className={`w-full py-3 text-white font-semibold rounded-xl ${isIN ? 'bg-blue-600' : 'bg-emerald-600'}`}>Xác nhận</button>
               </div>
             )}
-
-            {/* Không khớp */}
-            {matchResult && !matchResult.matched && (
-              <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 flex items-start gap-3">
-                <XCircle size={20} className="text-orange-500 shrink-0 mt-0.5" />
-                <div>
-                  <h4 className="font-semibold text-sm text-orange-800">Không nhận diện được nhân viên</h4>
-                  <p className="text-xs text-orange-600 mt-1">{matchResult.message}{matchResult.confidence != null && ` (Score: ${matchResult.confidence}%)`}</p>
-                  <p className="text-xs text-orange-500 mt-1">Hãy đảm bảo nhân viên đã được đăng ký khuôn mặt.</p>
-                </div>
-              </div>
-            )}
-
-            {/* Chờ */}
-            {!aiResult && !matchResult && !error && !isProcessing && (
-              <div className="flex-1 flex flex-col items-center justify-center text-slate-400 py-8">
-                <Fingerprint size={48} className="mb-4 opacity-40" />
-                <p className="text-sm font-medium">Sẵn sàng {isIN ? 'Check-in' : 'Check-out'}</p>
-                <p className="text-xs mt-1 text-center">Đưa khuôn mặt vào khung và nhấn Chụp &amp; Nhận diện</p>
-              </div>
+            {!aiResult && !matchResult && !error && !isVerifying && !isProcessing && (
+              <div className="h-full flex flex-col items-center justify-center text-slate-300 py-12"><Fingerprint size={64} className="mb-4 opacity-20" /><p className="text-sm font-medium">Sẵn sàng quét khuôn mặt</p></div>
             )}
           </div>
         </div>

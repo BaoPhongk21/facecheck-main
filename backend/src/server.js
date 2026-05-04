@@ -83,12 +83,38 @@ app.post('/api/v1/extract', async (req, res) => {
     const response = await fetch('http://127.0.0.1:8000/api/v1/extract', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(req.body)
+      body: JSON.stringify(req.body),
+      signal: AbortSignal.timeout(15000) // Timeout sau 15 giây
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('AI Service Error:', errorText);
+      return res.status(response.status).json({
+        success: false,
+        error: `AI Service trả về lỗi (${response.status})`
+      });
+    }
+
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('❌ AI Proxy Connection Error:', error.message);
+    res.status(500).json({ success: false, error: 'AI Service không phản hồi' });
+  }
+});
+
+app.post('/api/v1/liveness-check', async (req, res) => {
+  try {
+    const response = await fetch('http://127.0.0.1:8000/api/v1/liveness-check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req.body),
+      signal: AbortSignal.timeout(5000)
     });
     const data = await response.json();
-    res.status(response.status).json(data);
+    res.json(data);
   } catch (error) {
-    console.error('AI Proxy Error:', error);
     res.status(500).json({ success: false, error: 'AI Service không phản hồi' });
   }
 });
@@ -493,17 +519,115 @@ app.post('/api/attendance/checkin', async (req, res) => {
   }
 });
 
+// ─────────── QUICK SCAN (Combine Extract + Identify) ───────────
+app.post('/api/face/quick-scan', async (req, res) => {
+  try {
+    const { image_base64 } = req.body;
+    if (!image_base64) return res.status(400).json({ error: 'Thiếu dữ liệu hình ảnh' });
+
+    // 1. Gọi AI Service để trích xuất embedding
+    const aiResponse = await fetch('http://127.0.0.1:8000/api/v1/extract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image_base64 }),
+      signal: AbortSignal.timeout(15000)
+    });
+
+    if (!aiResponse.ok) {
+      return res.status(aiResponse.status).json({ matched: false, error: 'AI Service không phản hồi' });
+    }
+
+    const aiData = await aiResponse.json();
+    if (!aiData.success || !aiData.embedding) {
+      return res.json({ matched: false, message: aiData.error || 'Không tìm thấy khuôn mặt' });
+    }
+
+    // Kiểm tra chống giả mạo (Liveness Detection)
+    if (aiData.liveness_score !== undefined && aiData.liveness_score < 0.8) {
+      return res.status(403).json({
+        matched: false,
+        error: 'CẢNH BÁO GIAN LẬN: Hệ thống phát hiện bạn đang sử dụng ảnh chụp hoặc màn hình giả mạo! Vui lòng sử dụng người thật để điểm danh.',
+        isSpoofing: true
+      });
+    }
+
+    const embedding = aiData.embedding;
+
+    // 2. Nhận diện nhân viên từ embedding
+    const employees = await prisma.employee.findMany({
+      where: { isActive: true },
+      include: { department: true }
+    });
+
+    const enrolledEmployees = employees.filter(e => Array.isArray(e.faceEmbedding) && e.faceEmbedding.length > 0);
+    if (enrolledEmployees.length === 0) {
+      return res.json({ matched: false, aiData, message: 'Chưa có nhân viên nào đăng ký khuôn mặt' });
+    }
+
+    const cosineSim = (a, b) => {
+      const dot = a.reduce((s, v, i) => s + v * b[i], 0);
+      const nA = Math.sqrt(a.reduce((s, v) => s + v * v, 0));
+      const nB = Math.sqrt(b.reduce((s, v) => s + v * v, 0));
+      return dot / (nA * nB);
+    };
+
+    let bestMatch = null, bestScore = -1;
+    for (const emp of enrolledEmployees) {
+      if (emp.faceEmbedding.length !== embedding.length) continue;
+      const score = cosineSim(embedding, emp.faceEmbedding);
+      if (score > bestScore) {
+        bestScore = score;
+        bestMatch = emp;
+      }
+    }
+
+    if (bestScore < 0.55 || !bestMatch) {
+      return res.json({ matched: false, aiData, confidence: +(bestScore * 100).toFixed(1), message: 'Không tìm thấy nhân viên khớp' });
+    }
+
+    res.json({
+      matched: true,
+      confidence: +(bestScore * 100).toFixed(1),
+      aiData,
+      employee: {
+        id: bestMatch.id, employeeCode: bestMatch.employeeCode, fullName: bestMatch.fullName,
+        department: bestMatch.department.name, avatarUrl: bestMatch.avatarUrl
+      }
+    });
+  } catch (error) {
+    console.error('Quick Scan Error:', error);
+    res.status(500).json({ error: 'Lỗi máy chủ khi quét nhanh' });
+  }
+});
+
 // ─────────── FACE IDENTIFY ───────────
 app.post('/api/face/identify', async (req, res) => {
   console.log('🔍 Received identify request...');
   try {
-    const { embedding } = req.body;
+    const { embedding, livenessScore } = req.body;
     if (!embedding || !Array.isArray(embedding)) return res.status(400).json({ error: 'Thiếu embedding vector' });
+
     const employees = await prisma.employee.findMany({
-      where: { isActive: true, faceEmbedding: { isEmpty: false } },
+      where: {
+        isActive: true,
+      },
       include: { department: true }
     });
-    if (employees.length === 0) return res.json({ matched: false, message: 'Chưa có nhân viên nào đăng ký khuôn mặt' });
+
+    // Lọc thủ công các nhân viên đã có embedding để tránh lỗi Prisma type
+    const enrolledEmployees = employees.filter(e => Array.isArray(e.faceEmbedding) && e.faceEmbedding.length > 0);
+
+    if (enrolledEmployees.length === 0) return res.json({ matched: false, message: 'Chưa có nhân viên nào đăng ký khuôn mặt' });
+
+    // Kiểm tra chống giả mạo (Liveness Detection)
+    if (livenessScore !== undefined && livenessScore !== null && livenessScore < 0.8) {
+      return res.status(403).json({
+        matched: false,
+        error: 'CẢNH BÁO GIAN LẬN: Phát hiện sử dụng hình ảnh/video giả mạo. Hành động này sẽ được ghi lại vào hệ thống bảo mật.',
+        isSpoofing: true
+      });
+    }
+
     const cosineSim = (a, b) => {
       const dot = a.reduce((s, v, i) => s + v * b[i], 0);
       const nA = Math.sqrt(a.reduce((s, v) => s + v * v, 0));
@@ -511,7 +635,7 @@ app.post('/api/face/identify', async (req, res) => {
       return dot / (nA * nB);
     };
     let bestMatch = null, bestScore = -1;
-    for (const emp of employees) {
+    for (const emp of enrolledEmployees) {
       if (emp.faceEmbedding.length !== embedding.length) continue;
       const score = cosineSim(embedding, emp.faceEmbedding);
       if (score > bestScore) { bestScore = score; bestMatch = emp; }
@@ -1288,4 +1412,12 @@ app.put('/api/config', adminAuth, async (req, res) => {
 });
 
 const PORT = process.env.PORT || 5000;
+
+server.on('error', (e) => {
+  if (e.code === 'EADDRINUSE') {
+    console.error(`❌ Lỗi: Cổng ${PORT} đã bị chiếm dụng. Hãy tắt ứng dụng đang dùng cổng này hoặc đổi PORT khác trong file .env.`);
+    process.exit(1);
+  }
+});
+
 server.listen(PORT, () => console.log(`✅ BioHR Backend chạy tại cổng ${PORT} (với Socket.io)`));

@@ -1,7 +1,11 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import axios from 'axios';
 import Webcam from 'react-webcam';
-import { X, Camera, RefreshCw, UploadCloud, ShieldCheck, AlertCircle } from 'lucide-react';
+import { X, Camera, RefreshCw, UploadCloud, ShieldCheck, AlertCircle, ScanFace, Eye, ArrowLeft, ArrowRight, CheckCircle2 } from 'lucide-react';
+
+// Thay 'localhost' bằng URL Cloudflare hoặc Tên-máy-tính.local tại đây
+const BACKEND_API_BASE_URL = 'http://localhost:5000'; // For backend API calls
+const AI_SERVICE_BASE_URL = 'http://localhost:8000'; // For direct AI Service calls
 
 const AddEmployeeModal = ({ isOpen, onClose, onAdded }) => {
   const [step, setStep] = useState(1); // 1: Thông tin, 2: Quét khuôn mặt
@@ -18,9 +22,21 @@ const AddEmployeeModal = ({ isOpen, onClose, onAdded }) => {
   const [error, setError] = useState(null);
   const webcamRef = useRef(null);
 
+  // Liveness Challenge State
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [challengePassed, setChallengePassed] = useState(false);
+  const [challengeIndex, setChallengeIndex] = useState(0);
+  const [challengeStatus, setChallengeStatus] = useState('WAITING');
+  
+  const challenges = [
+    { id: 'BLINK', label: 'Chớp mắt', icon: <Eye className="text-blue-500" /> },
+    { id: 'LEFT', label: 'Nhìn sang TRÁI', icon: <ArrowLeft className="text-blue-500" /> },
+    { id: 'RIGHT', label: 'Nhìn sang PHẢI', icon: <ArrowRight className="text-blue-500" /> },
+  ];
+
   useEffect(() => {
     if (isOpen) {
-      axios.get('http://localhost:5000/api/departments')
+      axios.get(`${BACKEND_API_BASE_URL}/api/departments`)
         .then(res => setDepartments(res.data))
         .catch(err => console.error(err));
     } else {
@@ -36,6 +52,11 @@ const AddEmployeeModal = ({ isOpen, onClose, onAdded }) => {
   };
 
   const capture = useCallback(async () => {
+    if (!challengePassed) {
+      startLivenessChallenge();
+      return;
+    }
+
     const imageSrc = webcamRef.current.getScreenshot();
     if (!imageSrc) return;
 
@@ -43,32 +64,100 @@ const AddEmployeeModal = ({ isOpen, onClose, onAdded }) => {
     setError(null);
 
     try {
-      const response = await axios.post('http://localhost:8000/api/v1/extract', {
+      const response = await axios.post(`${BACKEND_API_BASE_URL}/api/v1/extract`, {
         image_base64: imageSrc
       });
-      
+
       if (response.data.success) {
         setFaceEmbedding(response.data.embedding);
       } else {
         setError(response.data.error || 'Trích xuất khuôn mặt thất bại');
       }
     } catch (err) {
-      setError(err.response?.data?.detail || 'Không thể kết nối với AI Service.');
+      setError(err.response?.data?.error || err.response?.data?.detail || err.message || 'Không thể kết nối với AI Service.');
     } finally {
       setIsProcessing(false);
+      setIsVerifying(false);
+      setChallengePassed(false); // Quan trọng: Reset cho lần sau
     }
-  }, [webcamRef]);
+  }, [webcamRef, challengePassed]);
+
+  useEffect(() => {
+    if (challengePassed) {
+      capture();
+    }
+  }, [challengePassed, capture]);
+
+  const startLivenessChallenge = async () => {
+    setIsVerifying(true);
+    setChallengePassed(false);
+    setChallengeIndex(0);
+    setChallengeStatus('WAITING');
+    setError(null);
+    
+    let currentStep = 0;
+    
+    const runStep = async () => {
+      if (currentStep >= challenges.length) {
+        setChallengePassed(true);
+        setIsVerifying(false);
+        return;
+      }
+      
+      setChallengeIndex(currentStep);
+      setChallengeStatus('WAITING');
+      await new Promise(r => setTimeout(r, 1200));
+      setChallengeStatus('PROCESSING');
+      
+      let attempts = 0;
+      const checkInterval = setInterval(async () => {
+        attempts++;
+        if (attempts > 50) {
+          clearInterval(checkInterval);
+          setIsVerifying(false);
+          setError(`Xác thực thất bại ở bước: ${challenges[currentStep].label}. Hãy thử lại.`);
+          return;
+        }
+        
+        const frame = webcamRef.current?.getScreenshot({ width: 320, height: 240 });
+        if (!frame) return;
+        
+        try {
+          const res = await axios.post(`${BACKEND_API_BASE_URL}/api/v1/liveness-check`, { image_base64: frame });
+          const { face_detected, pose, eyes } = res.data;
+          
+          if (!face_detected) return;
+          
+          let passed = false;
+          if (challenges[currentStep].id === 'BLINK') {
+            if (eyes === 'CLOSED') passed = true;
+          } else {
+            if (pose === challenges[currentStep].id) passed = true;
+          }
+          
+          if (passed) {
+            clearInterval(checkInterval);
+            setChallengeStatus('SUCCESS');
+            currentStep++;
+            setTimeout(runStep, 1000);
+          }
+        } catch (err) {}
+      }, 300);
+    };
+    
+    runStep();
+  };
 
   const handleSubmit = async () => {
     if (!faceEmbedding) {
       setError('Vui lòng quét khuôn mặt trước khi lưu.');
       return;
     }
-    
+
     setIsProcessing(true);
     setError(null);
     try {
-      await axios.post('http://localhost:5000/api/employees', {
+      await axios.post(`${BACKEND_API_BASE_URL}/api/employees`, {
         ...formData,
         faceEmbedding
       });
@@ -86,7 +175,7 @@ const AddEmployeeModal = ({ isOpen, onClose, onAdded }) => {
   return (
     <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-3xl shadow-xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-        
+
         {/* Tiêu đề */}
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
           <h2 className="text-xl font-bold text-slate-900">Thêm nhân viên mới</h2>
@@ -129,7 +218,7 @@ const AddEmployeeModal = ({ isOpen, onClose, onAdded }) => {
                   <input type="text" name="fullName" value={formData.fullName} onChange={handleChange} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-sm" placeholder="VD: Nguyễn Văn A" />
                 </div>
               </div>
-              
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-1.5">Email</label>
@@ -150,9 +239,9 @@ const AddEmployeeModal = ({ isOpen, onClose, onAdded }) => {
               </div>
 
               <div className="pt-4 flex justify-end">
-                <button 
+                <button
                   onClick={() => {
-                    if(!formData.employeeCode || !formData.fullName || !formData.departmentId) {
+                    if (!formData.employeeCode || !formData.fullName || !formData.departmentId) {
                       setError('Vui lòng điền các trường bắt buộc (*)');
                       return;
                     }
@@ -172,27 +261,48 @@ const AddEmployeeModal = ({ isOpen, onClose, onAdded }) => {
                   <p className="text-sm text-slate-500 text-center">Đưa khuôn mặt của <span className="font-semibold text-slate-700">{formData.fullName}</span> vào khung và nhấn Chụp để đăng ký sinh trắc học.</p>
                   <div className="relative rounded-xl overflow-hidden bg-slate-900 aspect-video flex items-center justify-center">
                     <Webcam audio={false} ref={webcamRef} screenshotFormat="image/jpeg" videoConstraints={{ facingMode: 'user' }} className="w-full h-full object-cover" />
+                    {isVerifying && (
+                      <div className="absolute inset-0 bg-slate-900/70 backdrop-blur-md flex flex-col items-center justify-center text-white z-30 p-6 text-center">
+                        <div className="w-16 h-16 bg-white/10 rounded-full flex items-center justify-center mb-4 relative">
+                           <div className="absolute inset-0 border-4 border-blue-500 rounded-full animate-ping"></div>
+                           {challenges[challengeIndex].icon}
+                        </div>
+                        <h4 className="text-lg font-bold mb-1">{challenges[challengeIndex].label}</h4>
+                        <p className="text-blue-300 text-xs font-medium">BƯỚC {challengeIndex + 1}/{challenges.length}</p>
+                        
+                        {challengeStatus === 'SUCCESS' && (
+                          <div className="mt-2 flex items-center gap-1 text-emerald-400 text-sm font-bold animate-bounce">
+                            <CheckCircle2 size={16} /> HOÀN THÀNH
+                          </div>
+                        )}
+                      </div>
+                    )}
                     {isProcessing && (
-                      <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm flex flex-col items-center justify-center text-white">
-                        <RefreshCw size={32} className="animate-spin text-blue-500 mb-3" />
-                        <p className="font-semibold text-sm tracking-wide">Đang phân tích khuôn mặt...</p>
+                      <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-md flex flex-col items-center justify-center text-white z-40">
+                        <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+                        <p className="font-bold text-sm text-blue-400">ĐÃ LẤY HÌNH ẢNH!</p>
+                        <p className="text-[10px] text-slate-300">Đang trích xuất dữ liệu...</p>
                       </div>
                     )}
                     {!isProcessing && (
                       <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                         <div className="w-48 h-48 border-2 border-blue-500/50 border-dashed rounded-xl relative">
-                            <div className="absolute top-0 left-0 w-4 h-4 border-t-4 border-l-4 border-blue-500 rounded-tl-lg"></div>
-                            <div className="absolute top-0 right-0 w-4 h-4 border-t-4 border-r-4 border-blue-500 rounded-tr-lg"></div>
-                            <div className="absolute bottom-0 left-0 w-4 h-4 border-b-4 border-l-4 border-blue-500 rounded-bl-lg"></div>
-                            <div className="absolute bottom-0 right-0 w-4 h-4 border-b-4 border-r-4 border-blue-500 rounded-br-lg"></div>
-                         </div>
+                        <div className="relative w-56 h-64 border-2 border-white/20 rounded-[2.5rem] shadow-[0_0_0_9999px_rgba(0,0,0,0.4)] flex items-center justify-center overflow-hidden">
+                           <div className="absolute top-0 left-0 w-full h-1 bg-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.8)] animate-scan-line"></div>
+                           <div className="absolute bottom-8 text-[9px] text-white/60 font-bold tracking-widest uppercase bg-black/40 px-3 py-1 rounded-full backdrop-blur-sm">
+                             Đặt khuôn mặt vào khung
+                           </div>
+                        </div>
                       </div>
                     )}
                   </div>
                   <div className="flex gap-3 justify-center">
                     <button onClick={() => setStep(1)} className="px-6 py-3 bg-slate-100 text-slate-700 font-medium rounded-xl hover:bg-slate-200 transition-colors">← Quay lại</button>
-                    <button onClick={capture} disabled={isProcessing} className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-700 transition-colors shadow-sm disabled:opacity-50">
-                      <Camera size={18} /> Chụp &amp; Quét khuôn mặt
+                    <button onClick={capture} disabled={isProcessing} className="flex items-center gap-2 px-8 py-3.5 bg-blue-600 text-white font-bold rounded-2xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 disabled:opacity-50">
+                      {isProcessing ? (
+                        <><RefreshCw size={18} className="animate-spin" /> Đang xác thực...</>
+                      ) : (
+                        <><ScanFace size={20} /> Chụp & Đăng ký người thật</>
+                      )}
                     </button>
                   </div>
                 </>
@@ -203,7 +313,7 @@ const AddEmployeeModal = ({ isOpen, onClose, onAdded }) => {
                   </div>
                   <h3 className="text-lg font-bold text-slate-900 mb-1">Quét khuôn mặt thành công!</h3>
                   <p className="text-slate-500 text-sm mb-6">Đã thu thập dữ liệu sinh trắc học cho <span className="font-semibold text-slate-700">{formData.fullName}</span></p>
-                  
+
                   <div className="flex gap-3 justify-center">
                     <button onClick={() => setFaceEmbedding(null)} className="px-6 py-2.5 bg-slate-100 text-slate-700 font-medium rounded-xl hover:bg-slate-200 transition-colors">Quét lại</button>
                     <button onClick={handleSubmit} disabled={isProcessing} className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 text-white font-medium rounded-xl hover:bg-emerald-700 transition-colors shadow-sm disabled:opacity-50">

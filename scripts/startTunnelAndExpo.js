@@ -33,7 +33,7 @@ const handleData = (data) => {
   const text = data.toString();
   process.stdout.write(text);
   buffer += text;
-  
+
   if (!urlFound) {
     const match = buffer.match(/https:\/\/[^\s]+trycloudflare\.com/);
     if (match) {
@@ -51,6 +51,10 @@ tunnel.stderr.on('data', handleData);
 
 tunnel.on('close', (code) => {
   console.log(`⚠️ Cloudflare tunnel process exited with code ${code}`);
+  if (code !== 0 && !urlFound) {
+    console.log('❌ Lỗi: Không thể khởi tạo Cloudflare Tunnel. Vui lòng kiểm tra internet hoặc cài đặt cloudflared.');
+    process.exit(1);
+  }
 });
 
 function startExpo() {

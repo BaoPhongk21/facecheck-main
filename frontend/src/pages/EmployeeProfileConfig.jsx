@@ -4,6 +4,9 @@ import Webcam from 'react-webcam';
 import useAuthStore from '../store/useAuthStore';
 import { User, Mail, Phone, ShieldCheck, ShieldAlert, Camera, UploadCloud, RefreshCw, AlertCircle } from 'lucide-react';
 
+const BACKEND_API = 'http://localhost:5000/api';
+const AI_SERVICE_API = 'http://localhost:5000/api/v1';
+
 const EmployeeProfileConfig = () => {
   const { user: employee, token, login } = useAuthStore();
   const [form, setForm] = useState({ email: '', phone: '', avatarUrl: '' });

@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { X, AlertCircle } from 'lucide-react';
 
+const API_BASE_URL = 'http://localhost:5000';
+
 const EditEmployeeModal = ({ employee, onClose, onUpdated }) => {
   const [formData, setFormData] = useState({ employeeCode: '', fullName: '', email: '', phone: '', departmentId: '' });
   const [departments, setDepartments] = useState([]);
@@ -18,7 +20,7 @@ const EditEmployeeModal = ({ employee, onClose, onUpdated }) => {
         departmentId: employee.departmentId || ''
       });
       setError(null);
-      axios.get('http://localhost:5000/api/departments').then(r => setDepartments(r.data)).catch(() => {});
+      axios.get(`${API_BASE_URL}/api/departments`).then(r => setDepartments(r.data)).catch(() => { });
     }
   }, [employee]);
 
@@ -35,7 +37,7 @@ const EditEmployeeModal = ({ employee, onClose, onUpdated }) => {
     setIsLoading(true);
     setError(null);
     try {
-      await axios.put(`http://localhost:5000/api/employees/${employee.id}`, formData);
+      await axios.put(`${API_BASE_URL}/api/employees/${employee.id}`, formData);
       onUpdated();
     } catch (err) {
       setError(err.response?.data?.error || 'Lỗi cập nhật nhân viên');

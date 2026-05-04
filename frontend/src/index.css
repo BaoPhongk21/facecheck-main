@@ -38,3 +38,14 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
 }
+
+/* Biometric Scan Animation */
+@keyframes scan {
+  0% { top: 0; }
+  50% { top: 100%; }
+  100% { top: 0; }
+}
+
+.animate-scan-line {
+  animation: scan 3s ease-in-out infinite;
+}
