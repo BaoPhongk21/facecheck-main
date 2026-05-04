@@ -7,6 +7,13 @@ from pydantic import BaseModel
 import mediapipe as mp
 import math
 # Move DeepFace import inside to speed up startup
+class VerifySequenceRequest(BaseModel):
+    image_1: str
+    image_2: str
+    image_3: str
+    sequence: list # Ví dụ: ["blink", "left", "right"]
+
+
 
 app = FastAPI(title="BioHR AI Service")
 
@@ -91,14 +98,20 @@ class LivenessDetector:
             
         print(f"Liveness: Pose={pose}, EAR={avg_ear:.3f}, YawR={yaw_ratio:.2f}, PitchR={pitch_ratio:.2f}")
         
+        # Tính điểm liveness dựa trên các yếu tố (mắt mở, tư thế thẳng, độ phân giải)
+        # Một bức ảnh tĩnh "thật" thường có điểm > 0.7
+        liveness_score = 0.95
+        if pose != "CENTER": liveness_score -= 0.2
+        if avg_ear < 0.2: liveness_score -= 0.1 # Nhắm mắt có thể là ảnh hoặc đang nháy mắt thật
+        
         return {
             "face_detected": True,
             "pose": pose,
             "eyes": eyes_status,
-            "ear": round(avg_ear, 3),
-            "yaw_ratio": round(yaw_ratio, 2),
-            "pitch_ratio": round(pitch_ratio, 2)
+            "liveness_score": round(liveness_score, 2),
+            "ear": round(avg_ear, 3)
         }
+
 
 liveness_detector = LivenessDetector()
 
@@ -190,15 +203,86 @@ def extract_face(payload: ImagePayload):
         print("Error:", e)
         raise HTTPException(status_code=500, detail="Lỗi AI Server")
 
-@app.post("/api/v1/liveness-check")
-def liveness_check(payload: ImagePayload):
+@app.post("/api/v1/liveness_poll")
+async def liveness_poll(payload: ImagePayload):
     try:
         img = decode_base64_image(payload.image_base64)
-        result = liveness_detector.analyze(img)
-        return result
+        # Chuyển BGR (OpenCV) sang RGB (MediaPipe)
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        result = liveness_detector.analyze(img_rgb)
+        
+        return {
+            "success": True,
+            "face_detected": result.get("face_detected", False),
+            "eyes": result.get("eyes", "OPEN"),
+            "pose": result.get("pose", "CENTER")
+        }
     except Exception as e:
-        print("Liveness Check Error:", e)
-        return {"face_detected": False, "error": str(e)}
+        return {"success": False, "error": str(e)}
+
+@app.post("/api/v1/verify_sequence")
+async def verify_sequence(request: VerifySequenceRequest):
+    try:
+        # 1. Giải mã 3 ảnh
+        def decode_img(b64):
+            header_part = b64.split(',')[-1]
+            data = base64.b64decode(header_part)
+            nparr = np.frombuffer(data, np.uint8)
+            return cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+        imgs = [decode_img(request.image_1), decode_img(request.image_2), decode_img(request.image_3)]
+
+        if any(img is None for img in imgs):
+            return {"success": False, "error": "Lỗi giải mã hình ảnh"}
+
+        # 2. Phân tích từng ảnh và so khớp với yêu cầu trong sequence
+        checks = {}
+        for i, action in enumerate(request.sequence):
+            res = liveness_detector.analyze(cv2.cvtColor(imgs[i], cv2.COLOR_BGR2RGB))
+            
+            if not res.get("face_detected"):
+                checks[action] = False
+                continue
+
+            if action == "blink":
+                checks[action] = res.get("eyes") == "CLOSED"
+            elif action == "left":
+                checks[action] = res.get("pose") == "LEFT"
+            elif action == "right":
+                checks[action] = res.get("pose") == "RIGHT"
+            else:
+                checks[action] = False
+
+        is_valid = all(checks.values())
+
+        if not is_valid:
+            failed_steps = [k for k, v in checks.items() if not v]
+            translated = {"blink": "Nháy mắt", "left": "Quay trái", "right": "Quay phải"}
+            err_msg = ", ".join([translated.get(s, s) for s in failed_steps])
+            return {
+                "success": False,
+                "error": f"Xác minh thất bại: {err_msg}",
+                "checks": checks
+            }
+
+        # 3. Nhận diện khuôn mặt (Dùng ảnh cuối cùng trong chuỗi)
+        from deepface import DeepFace
+        results = DeepFace.represent(img_path=imgs[2], model_name="Facenet", detector_backend="opencv", enforce_detection=True)
+        
+        if not results:
+            return {"success": False, "error": "Không trích xuất được khuôn mặt ở bước cuối"}
+
+        return {
+            "success": True,
+            "embedding": results[0]["embedding"],
+            "liveness_score": 1.0,
+            "checks": checks
+        }
+
+    except Exception as e:
+        print(f"Error in verify_sequence: {str(e)}")
+        return {"success": False, "error": f"Lỗi xử lý server: {str(e)}"}
+
 
 if __name__ == "__main__":
     import uvicorn

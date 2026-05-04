@@ -119,6 +119,22 @@ app.post('/api/v1/liveness-check', async (req, res) => {
   }
 });
 
+app.post('/api/v1/verify_sequence', async (req, res) => {
+  try {
+    const response = await fetch('http://127.0.0.1:8000/api/v1/verify_sequence', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req.body),
+      signal: AbortSignal.timeout(30000) // Chuỗi 3 ảnh nên để timeout dài hơn (30s)
+    });
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('❌ AI Sequence Proxy Error:', error.message);
+    res.status(500).json({ success: false, error: 'AI Service không phản hồi khi xác minh chuỗi' });
+  }
+});
+
 // ─────────── SEED ───────────
 app.post('/api/seed', async (req, res) => {
   try {
@@ -595,10 +611,11 @@ app.post('/api/face/quick-scan', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Quick Scan Error:', error);
-    res.status(500).json({ error: 'Lỗi máy chủ khi quét nhanh' });
+    console.error('❌ Quick Scan Error Detail:', error);
+    res.status(500).json({ error: `Lỗi máy chủ: ${error.message}` });
   }
 });
+
 
 // ─────────── FACE IDENTIFY ───────────
 app.post('/api/face/identify', async (req, res) => {
