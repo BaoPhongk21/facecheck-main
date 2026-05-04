@@ -1,0 +1,129 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Admin {
+  id           String   @id @default(uuid())
+  username     String   @unique
+  passwordHash String
+  role         Role     @default(HR)
+  createdAt    DateTime @default(now())
+}
+
+enum Role {
+  SUPER_ADMIN
+  HR
+}
+
+model Department {
+  id        String     @id @default(uuid())
+  name      String     @unique
+  employees Employee[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
+
+model Employee {
+  id             String          @id @default(uuid())
+  employeeCode   String          @unique
+  fullName       String
+  email          String?         @unique
+  phone          String?
+  departmentId   String
+  department     Department      @relation(fields: [departmentId], references: [id])
+  avatarUrl      String?
+  faceEmbedding  Float[]         // Mảng 512 số thực
+  passwordHash   String?
+  pinCode        String?         // Mã PIN dự phòng
+  isActive       Boolean         @default(true)
+  attendanceLogs AttendanceLog[]
+  leaves         Leave[]
+  exceptionReqs  ExceptionRequest[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+}
+
+model SystemConfig {
+  id               String   @id @default(uuid())
+  hourlyRate       Float    @default(100000)
+  standardHours    Float    @default(176)
+  updatedAt        DateTime @updatedAt
+}
+
+model AttendanceLog {
+  id              String   @id @default(uuid())
+  employeeId      String
+  employee        Employee @relation(fields: [employeeId], references: [id])
+  checkTime       DateTime @default(now())
+  type            LogType
+  status          Status   @default(ON_TIME)
+  method          String   @default("FACE") // FACE, PIN, MANUAL
+  snapshotUrl     String?
+  confidenceScore Float?
+  createdAt       DateTime @default(now())
+}
+
+model ExceptionRequest {
+  id           String      @id @default(uuid())
+  employeeId   String
+  employee     Employee    @relation(fields: [employeeId], references: [id])
+  type         LogType     // IN or OUT
+  checkTime    DateTime    // Thời gian xin điểm danh
+  reason       String
+  status       LeaveStatus @default(PENDING) // Tái sử dụng enum PENDING, APPROVED, REJECTED
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+}
+
+enum LogType {
+  IN
+  OUT
+}
+
+enum Status {
+  ON_TIME
+  LATE
+}
+
+model Shift {
+  id               String   @id @default(uuid())
+  name             String
+  startTime        String
+  endTime          String
+  color            String   @default("blue")
+  lateAfterMinutes Int      @default(15)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model Leave {
+  id           String      @id @default(uuid())
+  employeeId   String
+  employee     Employee    @relation(fields: [employeeId], references: [id])
+  type         String
+  from         String
+  to           String
+  days         Int
+  reason       String?
+  status       LeaveStatus @default(PENDING)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model Notification {
+  id           String   @id @default(uuid())
+  title        String
+  content      String
+  createdAt    DateTime @default(now())
+}
