@@ -45,10 +45,10 @@ def health_check_v1():
 
 @app.post("/api/v1/extract")
 def extract_face(payload: ImagePayload):
-    print("📥 Received extraction request...")
+    print("Received extraction request...")
     try:
         img = decode_base64_image(payload.image_base64)
-        print("🖼️ Image decoded successfully.")
+        print("Image decoded successfully.")
         
         # Trích xuất vector đặc trưng (Face Embedding)
         # Sử dụng mô hình Facenet và MTCNN để nhận diện chính xác hơn
@@ -68,7 +68,7 @@ def extract_face(payload: ImagePayload):
         embedding = face_data["embedding"]
         bbox = face_data["facial_area"]
         
-        print(f"✅ Extraction successful. Confidence: {face_data.get('face_confidence', 0.99)}")
+        print(f"Extraction successful. Confidence: {face_data.get('face_confidence', 0.99)}")
         return {
             "success": True,
             "embedding": embedding,
@@ -77,7 +77,7 @@ def extract_face(payload: ImagePayload):
         }
         
     except ValueError as ve:
-        print("❌ Face not detected.")
+        print("Face not detected.")
         # DeepFace quăng ValueError nếu không thấy khuôn mặt
         return {"success": False, "error": "Không nhận diện được khuôn mặt. Vui lòng thử lại gần camera hơn."}
     except Exception as e:

@@ -43,7 +43,7 @@ const EmployeeProfileConfig = () => {
     setIsSaving(true);
     setSaveMsg(null);
     try {
-      const res = await axios.put('http://localhost:5000/api/portal/update-profile', form, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await axios.put(`${BACKEND_API}/portal/update-profile`, form, { headers: { Authorization: `Bearer ${token}` } });
       login({ ...employee, ...res.data.employee }, token);
       setSaveMsg({ type: 'success', text: 'Cập nhật thông tin thành công!' });
     } catch (err) {
@@ -75,10 +75,10 @@ const EmployeeProfileConfig = () => {
     setFaceMsg(null);
     setFaceError(null);
     try {
-      const aiRes = await axios.post('http://localhost:8000/api/v1/extract', { image_base64: imageSrc });
+      const aiRes = await axios.post(`${AI_SERVICE_API}/extract`, { image_base64: imageSrc });
       if (!aiRes.data.success) { setFaceError(aiRes.data.error || 'Không nhận diện được khuôn mặt'); return; }
-      
-      await axios.put('http://localhost:5000/api/portal/update-face', { faceEmbedding: aiRes.data.embedding }, { headers: { Authorization: `Bearer ${token}` } });
+
+      await axios.put(`${BACKEND_API}/portal/update-face`, { faceEmbedding: aiRes.data.embedding }, { headers: { Authorization: `Bearer ${token}` } });
       login({ ...employee, faceEnrolled: true }, token);
       setFaceMsg('Cập nhật khuôn mặt thành công! Bạn có thể sử dụng khuôn mặt này để điểm danh.');
     } catch (err) {
@@ -93,18 +93,18 @@ const EmployeeProfileConfig = () => {
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        
+
         {/* Thông tin cá nhân */}
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-          <h3 className="text-lg font-bold text-slate-900 mb-6 flex items-center gap-2"><User className="text-blue-600" size={20}/> Hồ sơ cá nhân</h3>
-          
+          <h3 className="text-lg font-bold text-slate-900 mb-6 flex items-center gap-2"><User className="text-blue-600" size={20} /> Hồ sơ cá nhân</h3>
+
           <div className="flex items-center gap-4 mb-8">
             <div className="relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
               {form.avatarUrl ? (
                 <img src={form.avatarUrl} alt="Avatar" className="w-20 h-20 rounded-2xl object-cover border border-slate-200 shadow-sm transition-opacity group-hover:opacity-75" />
               ) : (
                 <div className="w-20 h-20 rounded-2xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-2xl border border-blue-200 shadow-sm transition-opacity group-hover:opacity-75">
-                  {employee.fullName ? employee.fullName.split(' ').map(n=>n[0]).join('').substring(0,2).toUpperCase() : 'NV'}
+                  {employee.fullName ? employee.fullName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : 'NV'}
                 </div>
               )}
               <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40 rounded-2xl">
@@ -127,12 +127,12 @@ const EmployeeProfileConfig = () => {
 
           <form onSubmit={handleUpdateProfile} className="space-y-4">
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5 flex items-center gap-2"><Mail size={16}/> Email liên hệ</label>
-              <input type="email" value={form.email} onChange={e => setForm(f => ({...f, email: e.target.value}))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"/>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5 flex items-center gap-2"><Mail size={16} /> Email liên hệ</label>
+              <input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none" />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5 flex items-center gap-2"><Phone size={16}/> Số điện thoại</label>
-              <input type="text" value={form.phone} onChange={e => setForm(f => ({...f, phone: e.target.value}))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"/>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5 flex items-center gap-2"><Phone size={16} /> Số điện thoại</label>
+              <input type="text" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none" />
             </div>
             <button type="submit" disabled={isSaving} className="w-full py-3 bg-slate-900 hover:bg-black text-white font-semibold rounded-xl transition-colors shadow-sm disabled:opacity-60">
               {isSaving ? 'Đang lưu...' : 'Lưu thông tin'}
@@ -142,7 +142,7 @@ const EmployeeProfileConfig = () => {
 
         {/* Đổi mật khẩu */}
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm col-span-1 lg:col-span-2 xl:col-span-1">
-          <h3 className="text-lg font-bold text-slate-900 mb-6 flex items-center gap-2"><User className="text-blue-600" size={20}/> Đổi mật khẩu</h3>
+          <h3 className="text-lg font-bold text-slate-900 mb-6 flex items-center gap-2"><User className="text-blue-600" size={20} /> Đổi mật khẩu</h3>
           {pwdMsg && (
             <div className={`p-3 rounded-xl mb-6 text-sm font-medium ${pwdMsg.type === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
               {pwdMsg.text}
@@ -151,11 +151,11 @@ const EmployeeProfileConfig = () => {
           <form onSubmit={handleChangePassword} className="space-y-4">
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-1.5">Mật khẩu hiện tại</label>
-              <input type="password" required value={pwdForm.currentPassword} onChange={e => setPwdForm(f => ({...f, currentPassword: e.target.value}))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"/>
+              <input type="password" required value={pwdForm.currentPassword} onChange={e => setPwdForm(f => ({ ...f, currentPassword: e.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none" />
             </div>
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-1.5">Mật khẩu mới</label>
-              <input type="password" required value={pwdForm.newPassword} onChange={e => setPwdForm(f => ({...f, newPassword: e.target.value}))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"/>
+              <input type="password" required value={pwdForm.newPassword} onChange={e => setPwdForm(f => ({ ...f, newPassword: e.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none" />
             </div>
             <button type="submit" disabled={isSavingPwd} className="w-full py-3 bg-slate-900 hover:bg-black text-white font-semibold rounded-xl transition-colors shadow-sm disabled:opacity-60">
               {isSavingPwd ? 'Đang lưu...' : 'Lưu mật khẩu'}
@@ -166,9 +166,9 @@ const EmployeeProfileConfig = () => {
         {/* Cập nhật khuôn mặt */}
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2"><Camera className="text-blue-600" size={20}/> Sinh trắc học</h3>
+            <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2"><Camera className="text-blue-600" size={20} /> Sinh trắc học</h3>
             <span className={`inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full ${employee.faceEnrolled ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-              {employee.faceEnrolled ? <><ShieldCheck size={14}/> Đã đăng ký khuôn mặt</> : <><ShieldAlert size={14}/> Chưa đăng ký</>}
+              {employee.faceEnrolled ? <><ShieldCheck size={14} /> Đã đăng ký khuôn mặt</> : <><ShieldAlert size={14} /> Chưa đăng ký</>}
             </span>
           </div>
 
@@ -176,7 +176,7 @@ const EmployeeProfileConfig = () => {
 
           <div className="relative rounded-2xl overflow-hidden bg-slate-900 aspect-video flex items-center justify-center mb-4">
             <Webcam audio={false} ref={webcamRef} screenshotFormat="image/jpeg" videoConstraints={{ facingMode: 'user' }} className="w-full h-full object-cover" />
-            
+
             {isProcessingFace && (
               <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm flex flex-col items-center justify-center text-white">
                 <RefreshCw size={32} className="animate-spin text-blue-400 mb-3" />
@@ -191,11 +191,11 @@ const EmployeeProfileConfig = () => {
             )}
           </div>
 
-          {faceError && <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-xl text-sm font-medium flex items-center gap-2"><AlertCircle size={18}/> {faceError}</div>}
-          {faceMsg && <div className="mb-4 p-3 bg-emerald-50 text-emerald-700 rounded-xl text-sm font-medium flex items-center gap-2"><ShieldCheck size={18}/> {faceMsg}</div>}
+          {faceError && <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-xl text-sm font-medium flex items-center gap-2"><AlertCircle size={18} /> {faceError}</div>}
+          {faceMsg && <div className="mb-4 p-3 bg-emerald-50 text-emerald-700 rounded-xl text-sm font-medium flex items-center gap-2"><ShieldCheck size={18} /> {faceMsg}</div>}
 
           <button onClick={captureFace} disabled={isProcessingFace} className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl transition-colors shadow-sm shadow-blue-200 disabled:opacity-60 flex items-center justify-center gap-2">
-            {isProcessingFace ? 'Đang xử lý...' : <><UploadCloud size={18}/> Chụp & Cập nhật khuôn mặt</>}
+            {isProcessingFace ? 'Đang xử lý...' : <><UploadCloud size={18} /> Chụp & Cập nhật khuôn mặt</>}
           </button>
         </div>
 

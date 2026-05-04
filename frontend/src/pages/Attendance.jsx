@@ -1,21 +1,16 @@
 import { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
-import { Calendar, Download, Users, AlertCircle, Clock, CheckCircle2, Filter, ShieldAlert } from 'lucide-react';
+import { Calendar, Download, Users, AlertCircle, Clock, CheckCircle2, Filter, ShieldAlert, Award } from 'lucide-react';
 import { BarChart, Bar, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
 
-const chartData = Array.from({ length: 30 }).map((_, i) => ({
-  name: `T10 ${i + 1}`,
-  present: Math.floor(Math.random() * 200) + 1000,
-  absent: Math.floor(Math.random() * 50) + 10,
-  isWeekend: i % 7 === 5 || i % 7 === 6,
-  isToday: i === 23,
-}));
 
 const ITEMS_PER_PAGE = 8;
 
 const Attendance = () => {
   const [attendanceLogs, setAttendanceLogs] = useState([]);
+  const [chartData, setChartData] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [manualReport, setManualReport] = useState([]);
   const [filterStatus, setFilterStatus] = useState('');
   const [activeTab, setActiveTab] = useState('log');
   const [page, setPage] = useState(1);
@@ -34,6 +29,28 @@ const Attendance = () => {
     };
     fetchLogs();
   }, [selectedDate]);
+
+  // Tải dữ liệu biểu đồ 30 ngày từ API
+  useEffect(() => {
+    const fetchChartData = async () => {
+      try {
+        const response = await axios.get('http://localhost:5000/api/attendance/chart');
+        setChartData(response.data);
+      } catch (error) {
+        console.error('Lỗi tải dữ liệu biểu đồ:', error);
+        setChartData([]);
+      }
+    };
+    fetchChartData();
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'manual') {
+      setLoading(true);
+      axios.get('http://localhost:5000/api/reports/manual-on-time')
+        .then(r => setManualReport(r.data)).catch(console.error).finally(() => setLoading(false));
+    }
+  }, [activeTab]);
 
   const exportCSV = () => {
     const header = 'Nhân viên,Vai trò,Trạng thái,Giờ vào,Ghi chú,Giờ ra,Độ tin cậy\n';
@@ -68,9 +85,10 @@ const Attendance = () => {
           <div className="flex bg-slate-100 p-1 rounded-xl">
             <button onClick={() => setActiveTab('log')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'log' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}>Nhật ký chi tiết</button>
             <button onClick={() => setActiveTab('chart')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'chart' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}>Biểu đồ xu hướng</button>
+            <button onClick={() => setActiveTab('manual')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'manual' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}>Báo cáo đặc biệt</button>
           </div>
           <div className="relative cursor-pointer">
-            <input 
+            <input
               type="date"
               value={selectedDate}
               onChange={(e) => setSelectedDate(e.target.value)}
@@ -87,26 +105,22 @@ const Attendance = () => {
       {/* Thống kê */}
       <div className="grid grid-cols-4 gap-6">
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-          <div className="flex justify-between items-start mb-4"><div className="bg-blue-50 p-2 rounded-lg text-blue-600"><Users size={20} /></div>
-            <span className="text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md text-xs font-bold">+4%</span></div>
+          <div className="flex justify-between items-start mb-4"><div className="bg-blue-50 p-2 rounded-lg text-blue-600"><Users size={20} /></div></div>
           <p className="text-3xl font-bold text-slate-900 mb-1">{presentCount}</p>
           <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Tổng có mặt</p>
         </div>
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-          <div className="flex justify-between items-start mb-4"><div className="bg-red-50 p-2 rounded-lg text-red-600"><AlertCircle size={20} /></div>
-            <span className="text-red-600 bg-red-50 px-2 py-1 rounded-md text-xs font-bold">-2%</span></div>
+          <div className="flex justify-between items-start mb-4"><div className="bg-red-50 p-2 rounded-lg text-red-600"><AlertCircle size={20} /></div></div>
           <p className="text-3xl font-bold text-slate-900 mb-1">{lateCount}</p>
           <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Đến trễ / Vắng</p>
         </div>
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-          <div className="flex justify-between items-start mb-4"><div className="bg-slate-100 p-2 rounded-lg text-slate-600"><Clock size={20} /></div>
-            <span className="text-slate-500 bg-slate-100 px-2 py-1 rounded-md text-xs font-bold">Bình thường</span></div>
+          <div className="flex justify-between items-start mb-4"><div className="bg-slate-100 p-2 rounded-lg text-slate-600"><Clock size={20} /></div></div>
           <p className="text-3xl font-bold text-slate-900 mb-1">{attendanceLogs.length > 0 ? ((presentCount / attendanceLogs.length) * 100).toFixed(1) : 0}%</p>
           <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Tỷ lệ đúng giờ</p>
         </div>
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-          <div className="flex justify-between items-start mb-4"><div className="bg-blue-50 p-2 rounded-lg text-blue-600"><CheckCircle2 size={20} /></div>
-            <span className="text-blue-600 bg-blue-50 px-2 py-1 rounded-md text-xs font-bold">99.9% ĐCX</span></div>
+          <div className="flex justify-between items-start mb-4"><div className="bg-blue-50 p-2 rounded-lg text-blue-600"><CheckCircle2 size={20} /></div></div>
           <p className="text-3xl font-bold text-slate-900 mb-1">{attendanceLogs.length}</p>
           <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Lượt xác minh AI</p>
         </div>
@@ -206,7 +220,7 @@ const Attendance = () => {
             </div>
           </div>
         </div>
-      ) : (
+      ) : activeTab === 'chart' ? (
         /* Biểu đồ xu hướng */
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between mb-6">
@@ -232,8 +246,57 @@ const Attendance = () => {
               </BarChart>
             </ResponsiveContainer>
           </div>
-          <div className="flex justify-between text-[10px] font-bold text-slate-400 uppercase mt-2 px-1">
-            <span>01/10</span><span>15/10</span><span>Hôm nay</span>
+          {chartData.length > 0 && (
+            <div className="flex justify-between text-[10px] font-bold text-slate-400 uppercase mt-2 px-1">
+              <span>{chartData[0]?.name}</span>
+              <span>{chartData[Math.floor(chartData.length / 2)]?.name}</span>
+              <span>Hôm nay</span>
+            </div>
+          )}
+        </div>
+      ) : (
+        /* Báo cáo manual approvals */
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden animate-in slide-in-from-bottom-4 duration-500">
+          <div className="p-6 border-b border-slate-100 bg-slate-50/50">
+            <h3 className="font-bold text-slate-900 flex items-center gap-2 text-lg">
+              <Award size={22} className="text-orange-500" /> Phân tích duyệt "Đúng giờ" đặc biệt
+            </h3>
+            <p className="text-sm text-slate-500 mt-1">Danh sách nhân viên thường xuyên đi muộn nhưng được Admin phê duyệt thành Đúng giờ.</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="border-b border-slate-100 text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50/50">
+                  <th className="p-4">Nhân viên</th>
+                  <th className="p-4">Phòng ban</th>
+                  <th className="p-4 text-center">Số lần được duyệt</th>
+                  <th className="p-4 text-center">Tổng thời gian trễ (phút)</th>
+                  <th className="p-4">Chi tiết gần nhất</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {manualReport.length === 0 ? (
+                  <tr><td colSpan={5} className="p-12 text-center text-slate-400">Không có dữ liệu phê duyệt đặc biệt nào phù hợp</td></tr>
+                ) : manualReport.map(item => (
+                  <tr key={item.employeeId} className="hover:bg-slate-50/80 transition-colors">
+                    <td className="p-4 font-bold text-slate-900">{item.name}</td>
+                    <td className="p-4 text-sm text-slate-600">{item.dept}</td>
+                    <td className="p-4 text-center">
+                      <span className="inline-block px-3 py-1 bg-orange-100 text-orange-700 rounded-full font-bold text-sm border border-orange-200">
+                        {item.count} lần
+                      </span>
+                    </td>
+                    <td className="p-4 text-center font-semibold text-slate-700">{item.totalDelay} phút</td>
+                    <td className="p-4">
+                      <div className="text-xs text-slate-500">
+                        {new Date(item.logs[0].checkTime).toLocaleDateString('vi-VN')} - {item.logs[0].shiftName}
+                        <br /><span className="text-red-500">Trễ thực tế: {item.logs[0].delayMinutes}m</span>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

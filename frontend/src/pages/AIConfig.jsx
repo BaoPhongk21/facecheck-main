@@ -17,6 +17,34 @@ const AIConfig = () => {
   const [actionResult, setActionResult] = useState(null);
   const [error, setError] = useState(null);
 
+  // Hàm phát thông báo bằng giọng nói (Tiếng Việt)
+  const speak = (text) => {
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'vi-VN';
+
+    // Lấy danh sách tất cả các giọng nói có sẵn trên trình duyệt
+    const voices = window.speechSynthesis.getVoices();
+
+    // Tìm giọng nữ Tiếng Việt (thường chứa các từ khóa như HoaiMy, Google, female, hoặc Linh)
+    const femaleVoice = voices.find(voice =>
+      voice.lang.includes('vi') &&
+      (voice.name.toLowerCase().includes('female') ||
+        voice.name.toLowerCase().includes('hoaimy') ||
+        voice.name.toLowerCase().includes('linh') ||
+        voice.name.toLowerCase().includes('google'))
+    );
+
+    if (femaleVoice) {
+      utterance.voice = femaleVoice;
+    }
+
+    // Điều chỉnh cao độ (pitch) và tốc độ (rate) để giọng nghe nữ tính và dễ nghe hơn
+    utterance.pitch = 1.1; // Tăng nhẹ cao độ
+    utterance.rate = 1.0;  // Tốc độ nói bình thường
+
+    window.speechSynthesis.speak(utterance);
+  };
+
   // Khi đổi chế độ → reset kết quả
   const switchMode = (m) => {
     setMode(m);
@@ -27,27 +55,49 @@ const AIConfig = () => {
   };
 
   const capture = useCallback(async () => {
-    const imageSrc = webcamRef.current?.getScreenshot();
+    const imageSrc = webcamRef.current?.getScreenshot({ width: 640, height: 480 });
     if (!imageSrc) return;
     setIsProcessing(true);
-    setAiResult(null);
-    setMatchResult(null);
-    setActionResult(null);
-    setError(null);
     try {
-      // Bước 1: AI Service trích xuất embedding
-      const aiRes = await axios.post('http://localhost:8000/api/v1/extract', { image_base64: imageSrc });
-      if (!aiRes.data.success) { setError(aiRes.data.error || 'Không nhận diện được khuôn mặt'); return; }
-      setAiResult(aiRes.data);
-      // Bước 2: Backend khớp nhân viên
-      const idRes = await axios.post('http://localhost:5000/api/face/identify', { embedding: aiRes.data.embedding });
+      // Gộp 2 bước thành 1 để giảm độ trễ mạng (quan trọng cho mobile)
+      const idRes = await axios.post('http://localhost:5000/api/face/quick-scan', { image_base64: imageSrc });
+
+      if (idRes.data.aiData) setAiResult(idRes.data.aiData);
       setMatchResult(idRes.data);
+
+      if (!idRes.data.matched) {
+        setError(idRes.data.message || 'Không nhận diện được nhân viên');
+        return;
+      }
+
+      // Tự động thực hiện điểm danh nếu nhận diện thành công
+      if (idRes.data.employee?.id) {
+        setIsActing(true);
+        const endpoint = mode === 'IN' ? 'http://localhost:5000/api/attendance/checkin' : 'http://localhost:5000/api/attendance/checkout';
+        const actionRes = await axios.post(endpoint, {
+          employeeId: idRes.data.employee.id,
+          confidenceScore: idRes.data.confidence / 100,
+          type: mode
+        });
+        setActionResult({ ...actionRes.data, mode });
+
+        // Phát thông báo chào mừng tự động
+        const employeeName = idRes.data.employee.fullName;
+        const message = mode === 'IN'
+          ? `Chào mừng ${employeeName} đã vào ca.`
+          : `Cảm ơn ${employeeName}, hẹn gặp lại bạn.`;
+        speak(message);
+
+        // Tự động reset trạng thái sau 7 giây để sẵn sàng cho lượt quét tiếp theo
+        setTimeout(() => resetAll(), 7000);
+      }
     } catch (err) {
       setError(err.response?.data?.detail || err.response?.data?.error || 'Không thể kết nối với AI Service.');
     } finally {
       setIsProcessing(false);
+      setIsActing(false);
     }
-  }, [webcamRef]);
+  }, [webcamRef, mode]);
 
   // Xử lý vào ca / ra ca
   const handleAction = async () => {
@@ -62,6 +112,18 @@ const AIConfig = () => {
         type: mode
       });
       setActionResult({ ...res.data, mode });
+
+      // Phát thông báo chào mừng khi nhấn xác nhận thủ công
+      const employeeName = matchResult.employee.fullName;
+      const message = mode === 'IN'
+        ? `Chào mừng ${employeeName} đã vào ca.`
+        : `Cảm ơn ${employeeName}, hẹn gặp lại bạn.`;
+      speak(message);
+
+      // Tự động reset trạng thái sau 7 giây để người tiếp theo có thể quét
+      setTimeout(() => {
+        resetAll();
+      }, 7000);
     } catch (err) {
       setError(err.response?.data?.error || `Lỗi khi ${mode === 'IN' ? 'vào ca' : 'ra ca'}`);
     } finally {
@@ -86,17 +148,15 @@ const AIConfig = () => {
         <div className="flex bg-slate-100 p-1.5 rounded-2xl gap-1 shadow-inner">
           <button
             onClick={() => switchMode('IN')}
-            className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${
-              isIN ? 'bg-blue-600 text-white shadow-md shadow-blue-200' : 'text-slate-500 hover:text-slate-700'
-            }`}
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${isIN ? 'bg-blue-600 text-white shadow-md shadow-blue-200' : 'text-slate-500 hover:text-slate-700'
+              }`}
           >
             <LogIn size={16} /> Vào ca (Check-in)
           </button>
           <button
             onClick={() => switchMode('OUT')}
-            className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${
-              !isIN ? 'bg-emerald-600 text-white shadow-md shadow-emerald-200' : 'text-slate-500 hover:text-slate-700'
-            }`}
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${!isIN ? 'bg-emerald-600 text-white shadow-md shadow-emerald-200' : 'text-slate-500 hover:text-slate-700'
+              }`}
           >
             <LogOut size={16} /> Ra ca (Check-out)
           </button>
@@ -105,7 +165,7 @@ const AIConfig = () => {
 
       {/* Banner chế độ hiện tại */}
       <div className={`flex items-center gap-3 p-3 rounded-xl border font-medium text-sm ${isIN ? 'bg-blue-50 border-blue-200 text-blue-800' : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}>
-        {isIN ? <LogIn size={18}/> : <LogOut size={18}/>}
+        {isIN ? <LogIn size={18} /> : <LogOut size={18} />}
         <span>Chế độ hiện tại: <b>{isIN ? 'VÀO CA — Check-in' : 'RA CA — Check-out'}</b></span>
         <span className={`ml-auto text-xs font-bold px-2 py-0.5 rounded-full ${isIN ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
           {isIN ? 'Ghi nhận giờ đến' : 'Ghi nhận giờ về + tính giờ làm'}
@@ -125,7 +185,18 @@ const AIConfig = () => {
           </div>
 
           <div className="relative rounded-xl overflow-hidden bg-slate-900 aspect-video flex items-center justify-center">
-            <Webcam audio={false} ref={webcamRef} screenshotFormat="image/jpeg" videoConstraints={{ facingMode: 'user' }} className="w-full h-full object-cover" />
+            <Webcam
+              audio={false}
+              ref={webcamRef}
+              screenshotFormat="image/jpeg"
+              screenshotQuality={0.8}
+              videoConstraints={{
+                width: 640,
+                height: 480,
+                facingMode: 'user'
+              }}
+              className="w-full h-full object-cover"
+            />
 
             {isProcessing && (
               <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm flex flex-col items-center justify-center text-white">
@@ -188,7 +259,7 @@ const AIConfig = () => {
             {/* Kết quả vào/ra ca */}
             {actionResult && (
               <div className={`p-4 rounded-xl border flex items-start gap-3 ${actionResult.mode === 'IN' ? 'bg-blue-50 border-blue-200' : 'bg-emerald-50 border-emerald-200'}`}>
-                {actionResult.mode === 'IN' ? <LogIn size={20} className="text-blue-600 shrink-0 mt-0.5"/> : <LogOut size={20} className="text-emerald-600 shrink-0 mt-0.5"/>}
+                {actionResult.mode === 'IN' ? <LogIn size={20} className="text-blue-600 shrink-0 mt-0.5" /> : <LogOut size={20} className="text-emerald-600 shrink-0 mt-0.5" />}
                 <div>
                   <h4 className={`font-semibold text-sm ${actionResult.mode === 'IN' ? 'text-blue-900' : 'text-emerald-900'}`}>
                     ✅ {actionResult.message}

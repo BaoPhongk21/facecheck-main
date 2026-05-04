@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "start": "expo start --tunnel",
+    "start": "npx expo start --tunnel",
     "share": "node ../scripts/startTunnelAndExpo.js",
-    "android": "expo start --android --tunnel",
-    "ios": "expo start --ios --tunnel",
-    "web": "expo start --web"
+    "android": "npx expo start --android --tunnel",
+    "ios": "npx expo start --ios --tunnel",
+    "web": "npx expo start --web"
   },
   "dependencies": {
     "@react-native-community/netinfo": "11.4.1",

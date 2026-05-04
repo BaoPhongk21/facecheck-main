@@ -1,36 +1,37 @@
-# Node.js
+# Dependencies
 node_modules/
-npm-debug.log
-yarn-error.log
+backend/node_modules/
+frontend/node_modules/
+mobile/node_modules/
 
-# Python
-venv/
-__pycache__/
-*.pyc
-.pytest_cache/
+# Python Environment
+ai-service/venv/
+ai-service/__pycache__/
+ai-service/*.pyc
 
-# Environment variables
+# Build outputs
+frontend/dist/
+mobile/.expo/
+mobile/web-build/
+
+# Environment variables (IMPORTANT: Do not push secrets)
 .env
-.env.local
-.env.*.local
+backend/.env
+ai-service/.env
 
-# Vite
-dist/
-dist-ssr/
-*.local
+# Databases & Local storage
+*.db
+*.sqlite
+backend/prisma/dev.db
 
-# Editor directories and files
-.idea
-.vscode
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+# Logs
+*.log
+npm-debug.log*
 
-# macOS
+# OS files
 .DS_Store
+Thumbs.db
 
-# Prisma
-backend/prisma/*.db
-backend/prisma/*.db-journal
+# AI Models (If they are large, better download separately)
+ai-service/models/*.pth
+ai-service/models/*.onnx
