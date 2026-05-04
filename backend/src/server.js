@@ -597,7 +597,7 @@ app.post('/api/face/quick-scan', async (req, res) => {
       }
     }
 
-    if (bestScore < 0.55 || !bestMatch) {
+    if (bestScore < 0.70 || !bestMatch) {
       return res.json({ matched: false, aiData, confidence: +(bestScore * 100).toFixed(1), message: 'Không tìm thấy nhân viên khớp' });
     }
 
@@ -1437,4 +1437,4 @@ server.on('error', (e) => {
   }
 });
 
-server.listen(PORT, () => console.log(`✅ BioHR Backend chạy tại cổng ${PORT} (với Socket.io)`));
+server.listen(PORT, '0.0.0.0', () => console.log(`✅ BioHR Backend chạy tại cổng ${PORT} (với Socket.io)`));

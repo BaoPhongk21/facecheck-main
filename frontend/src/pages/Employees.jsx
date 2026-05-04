@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { Download, Plus, Users, ShieldCheck, AlertTriangle, Fingerprint, Edit2, Eye, MoreVertical, Filter, Trash2, Search, X } from 'lucide-react';
+import { Download, Plus, Users, ShieldCheck, AlertTriangle, Fingerprint, Edit2, Eye, Filter, Trash2, Search, X } from 'lucide-react';
 import AddEmployeeModal from '../components/AddEmployeeModal';
 import EditEmployeeModal from '../components/EditEmployeeModal';
 
@@ -35,15 +35,25 @@ const Employees = () => {
   };
 
   useEffect(() => {
-    fetchEmployees();
-    axios.get('http://localhost:5000/api/departments').then(r => setDepartments(r.data)).catch(() => {});
+    const loadData = async () => {
+      try {
+        await fetchEmployees();
+        const deptRes = await axios.get('http://localhost:5000/api/departments');
+        setDepartments(deptRes.data);
+      } catch {
+        // Silently fail for departments
+      }
+    };
+    loadData();
   }, []);
 
   // Cập nhật search nếu URL thay đổi
   useEffect(() => {
     const s = searchParams.get('search');
-    if (s) setSearchText(s);
-  }, [searchParams]);
+    if (s && s !== searchText) {
+      Promise.resolve().then(() => setSearchText(s));
+    }
+  }, [searchParams, searchText]);
 
   // ── Lọc client-side ──
   const filtered = useMemo(() => {
@@ -81,7 +91,7 @@ const Employees = () => {
   const handleDeleteSelected = async () => {
     if (!window.confirm(`Xóa ${selectedIds.length} nhân viên đã chọn?`)) return;
     for (const id of selectedIds) {
-      try { await axios.delete(`http://localhost:5000/api/employees/${id}`); } catch {}
+      try { await axios.delete(`http://localhost:5000/api/employees/${id}`); } catch (err) { console.error(err); }
     }
     setSelectedIds([]);
     fetchEmployees();

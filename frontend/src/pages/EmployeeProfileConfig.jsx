@@ -2,14 +2,19 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import axios from 'axios';
 import Webcam from 'react-webcam';
 import useAuthStore from '../store/useAuthStore';
-import { User, Mail, Phone, ShieldCheck, ShieldAlert, Camera, UploadCloud, RefreshCw, AlertCircle } from 'lucide-react';
+import { User, Mail, Phone, ShieldCheck, ShieldAlert, Camera, UploadCloud, RefreshCw, AlertCircle, LogIn, LogOut } from 'lucide-react';
 
 const BACKEND_API = 'http://localhost:5000/api';
 const AI_SERVICE_API = 'http://localhost:5000/api/v1';
 
 const EmployeeProfileConfig = () => {
   const { user: employee, token, login } = useAuthStore();
-  const [form, setForm] = useState({ email: '', phone: '', avatarUrl: '' });
+  const [form, setForm] = useState(() => ({
+    email: employee?.email || '',
+    phone: employee?.phone || '',
+    avatarUrl: employee?.avatarUrl || ''
+  }));
+
   const [isSaving, setIsSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState(null);
 
@@ -26,7 +31,14 @@ const EmployeeProfileConfig = () => {
 
   useEffect(() => {
     if (employee) {
-      setForm({ email: employee.email || '', phone: employee.phone || '', avatarUrl: employee.avatarUrl || '' });
+      const { email, phone, avatarUrl } = employee;
+      Promise.resolve().then(() => {
+        setForm({
+          email: email || '',
+          phone: phone || '',
+          avatarUrl: avatarUrl || ''
+        });
+      });
     }
   }, [employee]);
 
@@ -94,112 +106,127 @@ const EmployeeProfileConfig = () => {
   if (!employee) return null;
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
 
         {/* Thông tin cá nhân */}
-        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-          <h3 className="text-lg font-bold text-slate-900 mb-6 flex items-center gap-2"><User className="text-blue-600" size={20} /> Hồ sơ cá nhân</h3>
+        <div className="bg-slate-800/40 border border-slate-700/50 rounded-[2.5rem] shadow-2xl backdrop-blur-2xl p-8">
+          <h3 className="text-xl font-black text-white mb-8 flex items-center gap-3 uppercase tracking-wider"><User className="text-indigo-400" size={24} /> Hồ sơ nhân sự</h3>
 
-          <div className="flex items-center gap-4 mb-8">
-            <div className="relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
+          <div className="flex items-center gap-6 mb-10 group">
+            <div className="relative cursor-pointer" onClick={() => fileInputRef.current?.click()}>
               {form.avatarUrl ? (
-                <img src={form.avatarUrl} alt="Avatar" className="w-20 h-20 rounded-2xl object-cover border border-slate-200 shadow-sm transition-opacity group-hover:opacity-75" />
+                <img src={form.avatarUrl} alt="Avatar" className="w-24 h-24 rounded-3xl object-cover border-2 border-indigo-500/50 shadow-2xl transition-all group-hover:scale-105 group-hover:border-indigo-400" />
               ) : (
-                <div className="w-20 h-20 rounded-2xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-2xl border border-blue-200 shadow-sm transition-opacity group-hover:opacity-75">
+                <div className="w-24 h-24 rounded-3xl bg-gradient-to-br from-indigo-600 to-blue-700 text-white flex items-center justify-center font-black text-3xl border-2 border-indigo-500/50 shadow-2xl transition-all group-hover:scale-105">
                   {employee.fullName ? employee.fullName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : 'NV'}
                 </div>
               )}
-              <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40 rounded-2xl">
-                <Camera className="text-white" size={24} />
+              <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all bg-black/40 rounded-3xl backdrop-blur-sm">
+                <Camera className="text-white" size={28} />
               </div>
               <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleFileChange} />
             </div>
             <div>
-              <h4 className="text-xl font-bold text-slate-900">{employee.fullName}</h4>
-              <p className="text-sm text-slate-500">MNV: {employee.employeeCode} · {employee.department}</p>
-              <button type="button" onClick={() => fileInputRef.current?.click()} className="text-xs text-blue-600 font-semibold hover:underline mt-1">Đổi ảnh đại diện</button>
+              <h4 className="text-2xl font-black text-white tracking-tight">{employee.fullName}</h4>
+              <p className="text-sm font-bold text-slate-400 mt-1 uppercase tracking-widest">Mã NV: <span className="text-indigo-400">{employee.employeeCode}</span> • {employee.department}</p>
+              <button type="button" onClick={() => fileInputRef.current?.click()} className="text-[10px] font-black text-indigo-400 hover:text-indigo-300 uppercase tracking-widest mt-3 bg-indigo-500/10 px-3 py-1 rounded-full border border-indigo-500/20 transition-colors">Thay đổi ảnh</button>
             </div>
           </div>
 
           {saveMsg && (
-            <div className={`p-3 rounded-xl mb-6 text-sm font-medium ${saveMsg.type === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
-              {saveMsg.text}
+            <div className={`p-4 rounded-2xl mb-8 text-sm font-bold border ${saveMsg.type === 'success' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border-rose-500/20'} animate-in zoom-in-95`}>
+              {saveMsg.type === 'success' ? '✓ ' : '⚠ '}{saveMsg.text}
             </div>
           )}
 
-          <form onSubmit={handleUpdateProfile} className="space-y-4">
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5 flex items-center gap-2"><Mail size={16} /> Email liên hệ</label>
-              <input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none" />
+          <form onSubmit={handleUpdateProfile} className="space-y-6">
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] ml-2 flex items-center gap-2"><Mail size={14} /> Email định danh</label>
+              <input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} className="w-full px-5 py-4 bg-slate-900/50 border border-slate-700/50 rounded-2xl text-white font-medium focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all placeholder:text-slate-600 shadow-inner" />
             </div>
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5 flex items-center gap-2"><Phone size={16} /> Số điện thoại</label>
-              <input type="text" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none" />
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] ml-2 flex items-center gap-2"><Phone size={14} /> Số điện thoại</label>
+              <input type="text" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} className="w-full px-5 py-4 bg-slate-900/50 border border-slate-700/50 rounded-2xl text-white font-medium focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all placeholder:text-slate-600 shadow-inner" />
             </div>
-            <button type="submit" disabled={isSaving} className="w-full py-3 bg-slate-900 hover:bg-black text-white font-semibold rounded-xl transition-colors shadow-sm disabled:opacity-60">
+            <button type="submit" disabled={isSaving} className="w-full py-4 bg-gradient-to-r from-slate-700 to-slate-800 hover:from-slate-600 hover:to-slate-700 text-white font-black text-xs uppercase tracking-[0.2em] rounded-2xl transition-all shadow-xl active:scale-[0.98] disabled:opacity-50">
               {isSaving ? 'Đang lưu...' : 'Lưu thông tin'}
             </button>
           </form>
         </div>
 
         {/* Đổi mật khẩu */}
-        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm col-span-1 lg:col-span-2 xl:col-span-1">
-          <h3 className="text-lg font-bold text-slate-900 mb-6 flex items-center gap-2"><User className="text-blue-600" size={20} /> Đổi mật khẩu</h3>
+        <div className="bg-slate-800/40 border border-slate-700/50 rounded-[2.5rem] shadow-2xl backdrop-blur-2xl p-8 h-fit">
+          <h3 className="text-xl font-black text-white mb-8 flex items-center gap-3 uppercase tracking-wider"><ShieldCheck className="text-indigo-400" size={24} /> Bảo mật tài khoản</h3>
           {pwdMsg && (
-            <div className={`p-3 rounded-xl mb-6 text-sm font-medium ${pwdMsg.type === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
+            <div className={`p-4 rounded-2xl mb-8 text-sm font-bold border ${pwdMsg.type === 'success' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border-rose-500/20'} animate-in zoom-in-95`}>
               {pwdMsg.text}
             </div>
           )}
-          <form onSubmit={handleChangePassword} className="space-y-4">
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Mật khẩu hiện tại</label>
-              <input type="password" required value={pwdForm.currentPassword} onChange={e => setPwdForm(f => ({ ...f, currentPassword: e.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none" />
+          <form onSubmit={handleChangePassword} className="space-y-6">
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] ml-2">Mật khẩu hiện tại</label>
+              <input type="password" required value={pwdForm.currentPassword} onChange={e => setPwdForm(f => ({ ...f, currentPassword: e.target.value }))} className="w-full px-5 py-4 bg-slate-900/50 border border-slate-700/50 rounded-2xl text-white font-medium focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all placeholder:text-slate-600 shadow-inner" />
             </div>
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Mật khẩu mới</label>
-              <input type="password" required value={pwdForm.newPassword} onChange={e => setPwdForm(f => ({ ...f, newPassword: e.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none" />
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] ml-2">Mật khẩu mới</label>
+              <input type="password" required value={pwdForm.newPassword} onChange={e => setPwdForm(f => ({ ...f, newPassword: e.target.value }))} className="w-full px-5 py-4 bg-slate-900/50 border border-slate-700/50 rounded-2xl text-white font-medium focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all placeholder:text-slate-600 shadow-inner" />
             </div>
-            <button type="submit" disabled={isSavingPwd} className="w-full py-3 bg-slate-900 hover:bg-black text-white font-semibold rounded-xl transition-colors shadow-sm disabled:opacity-60">
-              {isSavingPwd ? 'Đang lưu...' : 'Lưu mật khẩu'}
+            <button type="submit" disabled={isSavingPwd} className="w-full py-4 bg-gradient-to-r from-slate-700 to-slate-800 hover:from-slate-600 hover:to-slate-700 text-white font-black text-xs uppercase tracking-[0.2em] rounded-2xl transition-all shadow-xl active:scale-[0.98] disabled:opacity-50">
+              {isSavingPwd ? 'Đang xác thực...' : 'Đổi mật khẩu'}
             </button>
           </form>
         </div>
 
         {/* Cập nhật khuôn mặt */}
-        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2"><Camera className="text-blue-600" size={20} /> Sinh trắc học</h3>
-            <span className={`inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full ${employee.faceEnrolled ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-              {employee.faceEnrolled ? <><ShieldCheck size={14} /> Đã đăng ký khuôn mặt</> : <><ShieldAlert size={14} /> Chưa đăng ký</>}
+        <div className="bg-slate-800/40 border border-slate-700/50 rounded-[2.5rem] shadow-2xl backdrop-blur-2xl p-8 lg:col-span-2">
+          <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
+            <h3 className="text-xl font-black text-white flex items-center gap-3 uppercase tracking-wider"><Camera className="text-indigo-400" size={24} /> Sinh trắc học AI</h3>
+            <span className={`inline-flex items-center gap-2 text-[10px] font-black px-4 py-2 rounded-full uppercase tracking-widest ${employee.faceEnrolled ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'}`}>
+              {employee.faceEnrolled ? <><ShieldCheck size={14} className="animate-pulse" /> Đã kích hoạt nhận diện</> : <><ShieldAlert size={14} className="animate-bounce" /> Chưa đăng ký khuôn mặt</>}
             </span>
           </div>
 
-          <p className="text-sm text-slate-500 mb-4">Cập nhật khuôn mặt của bạn để hệ thống AI có thể nhận diện chính xác nhất khi điểm danh.</p>
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+            <div className="space-y-4">
+               <p className="text-slate-400 text-sm leading-relaxed">Sử dụng dữ liệu khuôn mặt để điểm danh nhanh chóng và bảo mật mà không cần quẹt thẻ hay nhập mã PIN.</p>
+               <div className="p-5 bg-indigo-500/10 rounded-2xl border border-indigo-500/20">
+                  <h5 className="text-xs font-black text-indigo-400 uppercase tracking-widest mb-2 flex items-center gap-2"><AlertCircle size={14} /> Hướng dẫn quan trọng</h5>
+                  <ul className="text-xs text-slate-400 space-y-1.5 list-disc ml-4">
+                    <li>Đảm bảo đủ ánh sáng, không đeo kính râm hoặc khẩu trang.</li>
+                    <li>Nhìn thẳng vào camera và giữ khoảng cách khoảng 50cm.</li>
+                    <li>Hình ảnh được mã hóa thành vector và không lưu trữ file ảnh gốc.</li>
+                  </ul>
+               </div>
+            </div>
 
-          <div className="relative rounded-2xl overflow-hidden bg-slate-900 aspect-video flex items-center justify-center mb-4">
-            <Webcam audio={false} ref={webcamRef} screenshotFormat="image/jpeg" videoConstraints={{ facingMode: 'user' }} className="w-full h-full object-cover" />
+            <div className="relative group">
+              <div className="relative rounded-3xl overflow-hidden bg-slate-900 aspect-video flex items-center justify-center border border-slate-700/50 shadow-inner group-hover:border-indigo-500/50 transition-colors">
+                <Webcam audio={false} ref={webcamRef} screenshotFormat="image/jpeg" videoConstraints={{ facingMode: 'user' }} className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-700" />
 
-            {isProcessingFace && (
-              <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm flex flex-col items-center justify-center text-white">
-                <RefreshCw size={32} className="animate-spin text-blue-400 mb-3" />
-                <p className="font-semibold text-sm">Đang trích xuất đặc trưng...</p>
+                {isProcessingFace && (
+                  <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-md flex flex-col items-center justify-center text-white z-20">
+                    <RefreshCw size={40} className="animate-spin text-indigo-400 mb-4" />
+                    <p className="font-black text-xs uppercase tracking-[0.2em]">Đang trích xuất đặc trưng AI...</p>
+                  </div>
+                )}
+
+                {!isProcessingFace && (
+                  <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                    <div className="w-48 h-48 border-2 border-indigo-500/30 border-dashed rounded-full animate-spin-slow"></div>
+                    <div className="absolute inset-0 bg-gradient-to-t from-slate-900/60 to-transparent"></div>
+                  </div>
+                )}
               </div>
-            )}
 
-            {!isProcessingFace && (
-              <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                <div className="w-40 h-40 border-2 border-blue-500/50 border-dashed rounded-full"></div>
-              </div>
-            )}
+              {faceError && <div className="mt-4 p-4 bg-rose-500/10 text-rose-400 rounded-2xl text-[11px] font-black uppercase tracking-widest border border-rose-500/20 flex items-center gap-3 animate-in slide-in-from-top-2"><AlertCircle size={18} /> {faceError}</div>}
+              {faceMsg && <div className="mt-4 p-4 bg-emerald-500/10 text-emerald-400 rounded-2xl text-[11px] font-black uppercase tracking-widest border border-emerald-500/20 flex items-center gap-3 animate-in slide-in-from-top-2"><ShieldCheck size={18} /> {faceMsg}</div>}
+
+              <button onClick={captureFace} disabled={isProcessingFace} className="mt-6 w-full py-4 bg-gradient-to-r from-indigo-600 to-blue-700 hover:from-indigo-700 hover:to-blue-800 text-white font-black text-xs uppercase tracking-[0.2em] rounded-2xl transition-all shadow-xl shadow-indigo-500/20 active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-3">
+                {isProcessingFace ? 'Đang phân tích...' : <><UploadCloud size={20} /> Cập nhật dữ liệu khuôn mặt</>}
+              </button>
+            </div>
           </div>
-
-          {faceError && <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-xl text-sm font-medium flex items-center gap-2"><AlertCircle size={18} /> {faceError}</div>}
-          {faceMsg && <div className="mb-4 p-3 bg-emerald-50 text-emerald-700 rounded-xl text-sm font-medium flex items-center gap-2"><ShieldCheck size={18} /> {faceMsg}</div>}
-
-          <button onClick={captureFace} disabled={isProcessingFace} className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl transition-colors shadow-sm shadow-blue-200 disabled:opacity-60 flex items-center justify-center gap-2">
-            {isProcessingFace ? 'Đang xử lý...' : <><UploadCloud size={18} /> Chụp & Cập nhật khuôn mặt</>}
-          </button>
         </div>
 
       </div>

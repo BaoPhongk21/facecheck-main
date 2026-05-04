@@ -9,10 +9,17 @@ const Settings = () => {
   const [msg, setMsg] = useState(null);
 
   useEffect(() => {
-    axios.get('http://localhost:5000/api/config')
-      .then(res => setConfig(res.data))
-      .catch(console.error)
-      .finally(() => setIsLoading(false));
+    const loadConfig = async () => {
+      try {
+        const res = await axios.get('http://localhost:5000/api/config');
+        setConfig(res.data);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadConfig();
   }, []);
 
   const handleSave = async (e) => {
@@ -23,7 +30,8 @@ const Settings = () => {
       const res = await axios.put('http://localhost:5000/api/config', config);
       setConfig(res.data);
       setMsg({ type: 'success', text: 'Đã lưu cấu hình hệ thống!' });
-    } catch (err) {
+    } catch (error) {
+      console.error(error);
       setMsg({ type: 'error', text: 'Lỗi lưu cấu hình' });
     } finally {
       setIsSaving(false);

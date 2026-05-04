@@ -54,7 +54,7 @@ export default function App() {
     if (isScanning && !loading && !result && !showLogin) {
       timer = setInterval(() => {
         handleQuickScan();
-      }, 1000); // Thử quét mỗi 1 giây
+      }, 2000); // Thử quét mỗi 2 giây để giảm chớp màn hình
     }
     return () => clearInterval(timer);
   }, [isScanning, loading, result, showLogin]);
@@ -62,10 +62,10 @@ export default function App() {
   const handleQuickScan = async () => {
     if (!cameraRef.current || loading || result) return;
     
-    // Tránh quét quá dày đặc
     const now = Date.now();
-    if (now - lastCheckTime < 1500) return;
+    if (now - lastCheckTime < 2500) return;
     setLastCheckTime(now);
+    setLoading(true); // Đánh dấu đang xử lý để tránh gọi chồng chéo
 
     try {
       const photo = await cameraRef.current.takePictureAsync({ 
@@ -107,6 +107,8 @@ export default function App() {
       }
     } catch (e) {
       console.log('Quick scan error:', e.message);
+    } finally {
+      setLoading(false);
     }
   };
 

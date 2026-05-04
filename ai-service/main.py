@@ -67,7 +67,7 @@ class LivenessDetector:
         avg_ear = (left_ear + right_ear) / 2.0
         
         # Giảm ngưỡng nhắm mắt một chút để dễ nhận diện hơn (0.22 thay vì 0.20)
-        eyes_status = "CLOSED" if avg_ear < 0.22 else "OPEN"
+        eyes_status = "CLOSED" if avg_ear < 0.25 else "OPEN"
         
         # 2. Pose Detection (Cải tiến với tỷ lệ khoảng cách)
         nose = landmarks[1]
@@ -203,7 +203,7 @@ def extract_face(payload: ImagePayload):
         print("Error:", e)
         raise HTTPException(status_code=500, detail="Lỗi AI Server")
 
-@app.post("/api/v1/liveness_poll")
+@app.post("/api/v1/liveness-check")
 async def liveness_poll(payload: ImagePayload):
     try:
         img = decode_base64_image(payload.image_base64)

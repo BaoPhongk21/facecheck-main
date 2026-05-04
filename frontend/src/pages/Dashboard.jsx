@@ -9,15 +9,13 @@ import EmployeeDashboard from './EmployeeDashboard';
 
 
 
-const nowDate = new Date().toLocaleDateString('vi-VN', { day: '2-digit', month: 'long', year: 'numeric' });
+
 
 const Dashboard = () => {
   const navigate = useNavigate();
   const { user } = useAuthStore();
 
-  if (user?.role === 'EMPLOYEE') {
-    return <EmployeeDashboard />;
-  }
+
 
   const exportReport = () => {
     const header = 'Số liệu,Giá trị\n';
@@ -92,6 +90,10 @@ const Dashboard = () => {
       socket.disconnect();
     };
   }, [selectedDate]);
+
+  if (user?.role === 'EMPLOYEE') {
+    return <EmployeeDashboard />;
+  }
 
   if (loading) return <div className="p-8 text-center text-slate-500">Đang tải dữ liệu từ máy chủ...</div>;
   return (

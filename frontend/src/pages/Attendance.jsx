@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
-import { Calendar, Download, Users, AlertCircle, Clock, CheckCircle2, Filter, ShieldAlert, Award } from 'lucide-react';
+import { Calendar, Download, Users, AlertCircle, Clock, CheckCircle2, ShieldAlert, Award } from 'lucide-react';
 import { BarChart, Bar, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
 
 
@@ -45,11 +45,20 @@ const Attendance = () => {
   }, []);
 
   useEffect(() => {
-    if (activeTab === 'manual') {
-      setLoading(true);
-      axios.get('http://localhost:5000/api/reports/manual-on-time')
-        .then(r => setManualReport(r.data)).catch(console.error).finally(() => setLoading(false));
-    }
+    const fetchManual = async () => {
+      if (activeTab === 'manual') {
+        try {
+          setLoading(true);
+          const r = await axios.get('http://localhost:5000/api/reports/manual-on-time');
+          setManualReport(r.data);
+        } catch (err) {
+          console.error(err);
+        } finally {
+          setLoading(false);
+        }
+      }
+    };
+    fetchManual();
   }, [activeTab]);
 
   const exportCSV = () => {
