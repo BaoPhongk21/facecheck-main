@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import axios from 'axios';
+import api from '../api/api';
 import { useNavigate } from 'react-router-dom';
 import useAuthStore from '../store/useAuthStore';
 import { Fingerprint, Lock, User } from 'lucide-react';
@@ -18,7 +18,7 @@ const Login = () => {
     setIsLoading(true);
 
     try {
-      const response = await axios.post('http://localhost:5000/api/auth/login', { username, password });
+      const response = await api.post('/auth/login', { username, password });
       login(response.data.user, response.data.token);
       navigate('/dashboard');
     } catch (err) {

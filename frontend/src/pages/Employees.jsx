@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import axios from 'axios';
-import { Download, Plus, Users, ShieldCheck, AlertTriangle, Fingerprint, Edit2, Eye, Filter, Trash2, Search, X } from 'lucide-react';
+import api from '../api/api';
+import { Download, Plus, Users, ShieldCheck, AlertTriangle, Fingerprint, Edit2, Eye, MoreVertical, Filter, Trash2, Search, X } from 'lucide-react';
 import AddEmployeeModal from '../components/AddEmployeeModal';
 import EditEmployeeModal from '../components/EditEmployeeModal';
 
@@ -22,10 +22,12 @@ const Employees = () => {
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [departments, setDepartments] = useState([]);
 
+  const [importing, setImporting] = useState(false);
+
   const fetchEmployees = async () => {
     try {
       setLoading(true);
-      const res = await axios.get('http://localhost:5000/api/employees');
+      const res = await api.get('/employees');
       setEmployees(res.data);
     } catch (err) {
       console.error(err);
@@ -34,26 +36,38 @@ const Employees = () => {
     }
   };
 
+  const handleImport = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      setImporting(true);
+      const res = await api.post('/employees/bulk-import', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      alert(res.data.message);
+      fetchEmployees();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Lỗi khi nhập dữ liệu');
+    } finally {
+      setImporting(false);
+      e.target.value = '';
+    }
+  };
+
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        await fetchEmployees();
-        const deptRes = await axios.get('http://localhost:5000/api/departments');
-        setDepartments(deptRes.data);
-      } catch {
-        // Silently fail for departments
-      }
-    };
-    loadData();
+    fetchEmployees();
+    api.get('/departments').then(r => setDepartments(r.data)).catch(() => {});
   }, []);
 
   // Cập nhật search nếu URL thay đổi
   useEffect(() => {
     const s = searchParams.get('search');
-    if (s && s !== searchText) {
-      Promise.resolve().then(() => setSearchText(s));
-    }
-  }, [searchParams, searchText]);
+    if (s) setSearchText(s);
+  }, [searchParams]);
 
   // ── Lọc client-side ──
   const filtered = useMemo(() => {
@@ -79,7 +93,7 @@ const Employees = () => {
   // ── Xóa nhân viên ──
   const handleDelete = async (id) => {
     try {
-      await axios.delete(`http://localhost:5000/api/employees/${id}`);
+      await api.delete(`/employees/${id}`);
       setDeleteConfirm(null);
       setSelectedIds(prev => prev.filter(x => x !== id));
       fetchEmployees();
@@ -91,7 +105,7 @@ const Employees = () => {
   const handleDeleteSelected = async () => {
     if (!window.confirm(`Xóa ${selectedIds.length} nhân viên đã chọn?`)) return;
     for (const id of selectedIds) {
-      try { await axios.delete(`http://localhost:5000/api/employees/${id}`); } catch (err) { console.error(err); }
+      try { await api.delete(`/employees/${id}`); } catch {}
     }
     setSelectedIds([]);
     fetchEmployees();
@@ -117,6 +131,17 @@ const Employees = () => {
           <p className="text-slate-500 mt-1">Quản lý dữ liệu sinh trắc học và hồ sơ nhân sự của tổ chức.</p>
         </div>
         <div className="flex items-center gap-3">
+          <input
+            type="file"
+            id="csv-import"
+            className="hidden"
+            accept=".csv"
+            onChange={handleImport}
+            disabled={importing}
+          />
+          <label htmlFor="csv-import" className={`flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 px-4 py-2 rounded-xl text-sm font-medium transition-colors shadow-sm cursor-pointer ${importing ? 'opacity-50 pointer-events-none' : ''}`}>
+            <Plus size={16} /> {importing ? 'Đang nhập...' : 'Nhập Excel'}
+          </label>
           <button onClick={exportCSV} className="flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 px-4 py-2 rounded-xl text-sm font-medium transition-colors shadow-sm">
             <Download size={16} /> Xuất Excel
           </button>
@@ -125,6 +150,7 @@ const Employees = () => {
           </button>
         </div>
       </div>
+
 
       {/* Thẻ thống kê */}
       <div className="grid grid-cols-4 gap-6">

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Plus, Edit2, Trash2, Clock, X, AlertCircle } from 'lucide-react';
 
@@ -75,24 +75,11 @@ const Shifts = () => {
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(null); // null | 'add' | shift object
 
-  const fetchShifts = useCallback(async () => {
-    try {
-      setLoading(true);
-      const r = await axios.get('http://localhost:5000/api/shifts');
-      setShifts(r.data);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    const loadData = async () => {
-      await fetchShifts();
-    };
-    loadData();
-  }, [fetchShifts]);
+  const fetchShifts = () => {
+    setLoading(true);
+    axios.get('http://localhost:5000/api/shifts').then(r => setShifts(r.data)).catch(console.error).finally(() => setLoading(false));
+  };
+  useEffect(() => { fetchShifts(); }, []);
 
   const handleDelete = async (id) => {
     if (!window.confirm('Xóa ca làm việc này?')) return;

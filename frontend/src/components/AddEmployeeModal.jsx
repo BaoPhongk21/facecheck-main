@@ -260,7 +260,7 @@ const AddEmployeeModal = ({ isOpen, onClose, onAdded }) => {
                 <>
                   <p className="text-sm text-slate-500 text-center">Đưa khuôn mặt của <span className="font-semibold text-slate-700">{formData.fullName}</span> vào khung và nhấn Chụp để đăng ký sinh trắc học.</p>
                   <div className="relative rounded-xl overflow-hidden bg-slate-900 aspect-video flex items-center justify-center">
-                    <Webcam audio={false} ref={webcamRef} screenshotFormat="image/jpeg" videoConstraints={{ facingMode: 'user' }} className="w-full h-full object-cover" />
+                    <Webcam audio={false} ref={webcamRef} screenshotFormat="image/jpeg" videoConstraints={{ facingMode: 'user' }} mirrored={true} className="w-full h-full object-cover" />
                     {isVerifying && (
                       <div className="absolute inset-0 bg-slate-900/70 backdrop-blur-md flex flex-col items-center justify-center text-white z-30 p-6 text-center">
                         <div className="w-16 h-16 bg-white/10 rounded-full flex items-center justify-center mb-4 relative">

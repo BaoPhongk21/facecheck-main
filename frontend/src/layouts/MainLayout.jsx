@@ -66,18 +66,18 @@ const MainLayout = () => {
   ];
 
   return (
-    <div className={`flex h-screen ${user?.role === 'EMPLOYEE' ? 'bg-[#0f172a]' : 'bg-[#f8fafc]'} text-slate-900 font-sans`}>
+    <div className="flex h-screen bg-[#f8fafc] text-slate-900 font-sans">
       {/* Thanh điều hướng bên trái */}
-      <aside className={`w-64 ${user?.role === 'EMPLOYEE' ? 'bg-[#1e293b] border-slate-800' : 'bg-white border-slate-200'} border-r flex flex-col transition-colors duration-500`}>
+      <aside className="w-64 bg-white border-r border-slate-200 flex flex-col">
         {/* Logo */}
         <div className="p-6">
           <div className="flex items-center gap-3">
-            <div className={`${user?.role === 'EMPLOYEE' ? 'bg-indigo-500 shadow-lg shadow-indigo-500/20' : 'bg-blue-600'} text-white p-1.5 rounded-lg`}>
+            <div className="bg-blue-600 text-white p-1.5 rounded-lg">
               <Fingerprint size={24} />
             </div>
             <div>
-              <h1 className={`${user?.role === 'EMPLOYEE' ? 'text-white' : 'text-blue-700'} font-bold text-lg leading-tight tracking-tight`}>BioHR Systems</h1>
-              <p className={`${user?.role === 'EMPLOYEE' ? 'text-slate-400' : 'text-slate-500'} text-[10px] font-semibold tracking-wider uppercase`}>{user?.role === 'EMPLOYEE' ? 'Portal Nhân viên' : 'Quản trị viên'}</p>
+              <h1 className="text-blue-700 font-bold text-lg leading-tight tracking-tight">BioHR Systems</h1>
+              <p className="text-slate-500 text-[10px] font-semibold tracking-wider uppercase">{user?.role === 'EMPLOYEE' ? 'Portal Nhân viên' : 'Quản trị viên'}</p>
             </div>
           </div>
         </div>
@@ -92,8 +92,8 @@ const MainLayout = () => {
                   className={({ isActive }) =>
                     `flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 ${
                       isActive 
-                        ? (user?.role === 'EMPLOYEE' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20 font-medium' : 'bg-blue-50 text-blue-700 font-medium')
-                        : (user?.role === 'EMPLOYEE' ? 'text-slate-400 hover:bg-slate-800 hover:text-white' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900')
+                        ? 'bg-blue-50 text-blue-700 font-medium' 
+                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
                     }`
                   }
                 >
@@ -106,24 +106,24 @@ const MainLayout = () => {
         </nav>
 
         {/* Thao tác cuối thanh bên */}
-        <div className={`p-4 border-t ${user?.role === 'EMPLOYEE' ? 'border-slate-800' : 'border-slate-100'}`}>
+        <div className="p-4 border-t border-slate-100">
           {user?.role === 'EMPLOYEE' && (
             <button
               onClick={() => navigate('/ai-config')}
-              className="w-full mb-4 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white flex items-center justify-center gap-2 py-2.5 rounded-xl transition-all font-bold text-sm shadow-lg shadow-indigo-500/20 active:scale-[0.98]"
+              className="w-full mb-4 bg-blue-700 hover:bg-blue-800 text-white flex items-center justify-center gap-2 py-2.5 rounded-xl transition-colors font-medium text-sm shadow-sm shadow-blue-200"
             >
               ⚡ Điểm danh Camera
             </button>
           )}
           <ul className="space-y-1">
             <li>
-              <a href="#" className={`flex items-center gap-3 px-4 py-2.5 rounded-xl transition-colors ${user?.role === 'EMPLOYEE' ? 'text-slate-400 hover:bg-slate-800 hover:text-white' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
+              <a href="#" className="flex items-center gap-3 px-4 py-2.5 rounded-xl text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-colors">
                 <HelpCircle size={20} />
                 <span className="text-sm">Trung tâm hỗ trợ</span>
               </a>
             </li>
             <li>
-              <a href="#" onClick={handleLogout} className="flex items-center gap-3 px-4 py-2.5 rounded-xl text-red-500 hover:bg-red-50/10 transition-colors">
+              <a href="#" onClick={handleLogout} className="flex items-center gap-3 px-4 py-2.5 rounded-xl text-red-600 hover:bg-red-50 transition-colors">
                 <LogOut size={20} />
                 <span className="text-sm">Đăng xuất</span>
               </a>
@@ -135,7 +135,7 @@ const MainLayout = () => {
       {/* Nội dung chính */}
       <main className="flex-1 flex flex-col overflow-hidden">
         {/* Thanh trên */}
-        <header className={`h-16 ${user?.role === 'EMPLOYEE' ? 'bg-[#1e293b]/80 border-slate-800' : 'bg-white border-slate-200'} border-b flex items-center justify-between px-8 shrink-0 backdrop-blur-md sticky top-0 z-40 transition-colors duration-500`}>
+        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 shrink-0">
           <div className="relative w-96">
             {user?.role !== 'EMPLOYEE' && (
               <>
@@ -150,30 +150,27 @@ const MainLayout = () => {
                 />
               </>
             )}
-            {user?.role === 'EMPLOYEE' && (
-              <h2 className="text-white font-bold text-lg">Chào buổi tối, {user.fullName.split(' ').pop()} 👋</h2>
-            )}
           </div>
           <div className="flex items-center gap-6">
             <div className="relative" ref={notifRef}>
-              <button onClick={() => setShowNotifMenu(!showNotifMenu)} className={`${user?.role === 'EMPLOYEE' ? 'text-slate-400 hover:text-white' : 'text-slate-400 hover:text-slate-600'} transition-colors relative`}>
+              <button onClick={() => setShowNotifMenu(!showNotifMenu)} className="text-slate-400 hover:text-slate-600 transition-colors relative">
                 <Bell size={20} />
                 <span className="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full border border-white"></span>
               </button>
               {showNotifMenu && (
-                <div className={`absolute right-0 mt-4 w-80 ${user?.role === 'EMPLOYEE' ? 'bg-[#1e293b] border-slate-700' : 'bg-white border-slate-100'} rounded-2xl shadow-xl border z-50 overflow-hidden animate-in fade-in slide-in-from-top-2`}>
-                  <div className={`p-4 border-b ${user?.role === 'EMPLOYEE' ? 'border-slate-700 bg-slate-800/50' : 'border-slate-100 bg-slate-50'} flex items-center justify-between`}>
-                    <h3 className={`font-bold ${user?.role === 'EMPLOYEE' ? 'text-white' : 'text-slate-900'}`}>Thông báo mới</h3>
+                <div className="absolute right-0 mt-4 w-80 bg-white rounded-2xl shadow-xl border border-slate-100 z-50 overflow-hidden animate-in fade-in slide-in-from-top-2">
+                  <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+                    <h3 className="font-bold text-slate-900">Thông báo mới</h3>
                     {user?.role !== 'EMPLOYEE' && <button onClick={() => {setShowNotifMenu(false); navigate('/notifications');}} className="text-xs text-blue-600 font-semibold hover:underline">Quản lý</button>}
                   </div>
                   <div className="max-h-[300px] overflow-y-auto">
                     {notifications.length === 0 ? (
-                      <div className={`p-6 text-center ${user?.role === 'EMPLOYEE' ? 'text-slate-500' : 'text-slate-500'} text-sm`}>Không có thông báo nào</div>
+                      <div className="p-6 text-center text-slate-500 text-sm">Không có thông báo nào</div>
                     ) : notifications.map(n => (
-                      <div key={n.id} className={`p-4 border-b ${user?.role === 'EMPLOYEE' ? 'border-slate-800 hover:bg-slate-800' : 'border-slate-50 hover:bg-slate-50'} transition-colors`}>
-                        <h4 className={`text-sm font-bold ${user?.role === 'EMPLOYEE' ? 'text-slate-200' : 'text-slate-900'} mb-1`}>{n.title}</h4>
-                        <p className={`text-xs ${user?.role === 'EMPLOYEE' ? 'text-slate-400' : 'text-slate-500'} line-clamp-2`}>{n.content}</p>
-                        <p className="text-[10px] text-slate-500 mt-2">{new Date(n.date).toLocaleString('vi-VN')}</p>
+                      <div key={n.id} className="p-4 border-b border-slate-50 hover:bg-slate-50 transition-colors">
+                        <h4 className="text-sm font-bold text-slate-900 mb-1">{n.title}</h4>
+                        <p className="text-xs text-slate-500 line-clamp-2">{n.content}</p>
+                        <p className="text-[10px] text-slate-400 mt-2">{new Date(n.date).toLocaleString('vi-VN')}</p>
                       </div>
                     ))}
                   </div>
@@ -181,43 +178,41 @@ const MainLayout = () => {
               )}
             </div>
             <div className="relative" ref={settingsRef}>
-              <button onClick={() => setShowSettingsMenu(!showSettingsMenu)} className={`${user?.role === 'EMPLOYEE' ? 'text-slate-400 hover:text-white' : 'text-slate-400 hover:text-slate-600'} transition-colors`}>
+              <button onClick={() => setShowSettingsMenu(!showSettingsMenu)} className="text-slate-400 hover:text-slate-600 transition-colors">
                 <Settings size={20} />
               </button>
               {showSettingsMenu && (
-                <div className={`absolute right-0 mt-4 w-48 ${user?.role === 'EMPLOYEE' ? 'bg-[#1e293b] border-slate-700' : 'bg-white border-slate-100'} rounded-xl shadow-xl border z-50 overflow-hidden animate-in fade-in slide-in-from-top-2`}>
+                <div className="absolute right-0 mt-4 w-48 bg-white rounded-xl shadow-xl border border-slate-100 z-50 overflow-hidden animate-in fade-in slide-in-from-top-2">
                   <div className="p-2 space-y-1">
                     {user?.role === 'EMPLOYEE' && (
-                      <button onClick={() => {setShowSettingsMenu(false); navigate('/profile');}} className={`w-full flex items-center gap-3 px-3 py-2 text-sm ${user?.role === 'EMPLOYEE' ? 'text-slate-300 hover:bg-slate-800 hover:text-white' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'} rounded-lg transition-colors`}>
+                      <button onClick={() => {setShowSettingsMenu(false); navigate('/profile');}} className="w-full flex items-center gap-3 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 hover:text-slate-900 rounded-lg transition-colors">
                         <User size={16} /> Hồ sơ cá nhân
                       </button>
                     )}
-                    <button onClick={handleLogout} className="w-full flex items-center gap-3 px-3 py-2 text-sm text-red-500 hover:bg-red-50/10 rounded-lg transition-colors">
+                    <button onClick={handleLogout} className="w-full flex items-center gap-3 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors">
                       <LogOut size={16} /> Đăng xuất
                     </button>
                   </div>
                 </div>
               )}
             </div>
-            <div className={`h-8 w-[1px] ${user?.role === 'EMPLOYEE' ? 'bg-slate-700' : 'bg-slate-200'}`}></div>
-            <div className="flex items-center gap-3 cursor-pointer" onClick={() => user?.role === 'EMPLOYEE' && navigate('/profile')}>
+            <div className="h-8 w-[1px] bg-slate-200"></div>
+            <div className="flex items-center gap-3 cursor-pointer">
               <div className="text-right">
-                <p className={`text-sm font-bold ${user?.role === 'EMPLOYEE' ? 'text-white' : 'text-slate-900'}`}>{user?.fullName || user?.username || 'Admin'}</p>
-                <p className={`text-xs font-medium ${user?.role === 'EMPLOYEE' ? 'text-indigo-400' : 'text-slate-500'}`}>{user?.role === 'EMPLOYEE' ? user?.department : (user?.role === 'SUPER_ADMIN' ? 'Quản trị hệ thống' : 'Quản lý HR')}</p>
+                <p className="text-sm font-medium text-slate-900">{user?.fullName || user?.username || 'Admin'}</p>
+                <p className="text-xs text-slate-500">{user?.role === 'EMPLOYEE' ? user?.department : (user?.role === 'SUPER_ADMIN' ? 'Quản trị hệ thống' : 'Quản lý HR')}</p>
               </div>
               {user?.role === 'EMPLOYEE' && user?.avatarUrl ? (
-                <img src={user.avatarUrl} alt="Hồ sơ" className="w-10 h-10 rounded-full border-2 border-indigo-500 shadow-lg shadow-indigo-500/20 object-cover" />
+                <img src={user.avatarUrl} alt="Hồ sơ" className="w-10 h-10 rounded-full border border-slate-200 shadow-sm object-cover" />
               ) : (
-                <div className={`w-10 h-10 rounded-full border-2 ${user?.role === 'EMPLOYEE' ? 'border-indigo-500 bg-indigo-600 text-white' : 'border-slate-200 bg-slate-100 text-slate-500'} flex items-center justify-center font-bold text-sm shadow-lg`}>
-                  {(user?.fullName || 'A').split(' ').pop()[0]}
-                </div>
+                <img src="https://randomuser.me/api/portraits/men/32.jpg" alt="Hồ sơ" className="w-10 h-10 rounded-full border border-slate-200 shadow-sm" />
               )}
             </div>
           </div>
         </header>
 
         {/* Nội dung trang */}
-        <div className={`flex-1 overflow-auto p-8 ${user?.role === 'EMPLOYEE' ? 'bg-[#0f172a]' : 'bg-[#f8fafc]'}`}>
+        <div className="flex-1 overflow-auto p-8">
           <Outlet />
         </div>
       </main>

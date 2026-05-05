@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
+import api from '../api/api';
 import { io } from 'socket.io-client';
 import { useNavigate } from 'react-router-dom';
 import { Calendar, Download, Users, CheckCircle2, Clock, Fingerprint, ChevronRight, Maximize2, Video } from 'lucide-react';
@@ -9,13 +9,15 @@ import EmployeeDashboard from './EmployeeDashboard';
 
 
 
-
+const nowDate = new Date().toLocaleDateString('vi-VN', { day: '2-digit', month: 'long', year: 'numeric' });
 
 const Dashboard = () => {
   const navigate = useNavigate();
   const { user } = useAuthStore();
 
-
+  if (user?.role === 'EMPLOYEE') {
+    return <EmployeeDashboard />;
+  }
 
   const exportReport = () => {
     const header = 'Số liệu,Giá trị\n';
@@ -46,8 +48,8 @@ const Dashboard = () => {
     const fetchData = async () => {
       try {
         const [statsRes, feedRes] = await Promise.all([
-          axios.get(`http://localhost:5000/api/dashboard/stats?date=${selectedDate}`),
-          axios.get(`http://localhost:5000/api/dashboard/feed?date=${selectedDate}`)
+          api.get(`/dashboard/stats?date=${selectedDate}`),
+          api.get(`/dashboard/feed?date=${selectedDate}`)
         ]);
         setStats(statsRes.data);
         setFeedData(feedRes.data);
@@ -60,7 +62,8 @@ const Dashboard = () => {
     fetchData();
 
     // ── Socket.io Listener ──
-    const socket = io('http://localhost:5000');
+    const socketUrl = (api.defaults.baseURL || 'http://localhost:5000').replace('/api', '');
+    const socket = io(socketUrl);
     
     socket.on('attendanceUpdate', (data) => {
       console.log('📢 Real-time update:', data);
@@ -90,10 +93,6 @@ const Dashboard = () => {
       socket.disconnect();
     };
   }, [selectedDate]);
-
-  if (user?.role === 'EMPLOYEE') {
-    return <EmployeeDashboard />;
-  }
 
   if (loading) return <div className="p-8 text-center text-slate-500">Đang tải dữ liệu từ máy chủ...</div>;
   return (
@@ -178,24 +177,35 @@ const Dashboard = () => {
           </div>
           <div className="p-2 flex-1">
             {feedData.map((item, idx) => (
-              <div key={idx} className="flex items-center justify-between p-3 hover:bg-slate-50 rounded-xl transition-colors cursor-pointer">
+              <div key={idx} className="flex items-center justify-between p-3 hover:bg-slate-50 rounded-xl transition-colors cursor-pointer border-b border-slate-50 last:border-0">
                 <div className="flex items-center gap-3">
                   <div className="relative">
-                    <img src={item.avatar} alt={item.name} className="w-10 h-10 rounded-full object-cover" />
-                    <div className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-white ${item.status === 'LATE' ? 'bg-red-500' : 'bg-emerald-500'}`}></div>
+                    <img src={item.avatar} alt={item.name} className="w-10 h-10 rounded-full object-cover border border-slate-100" onError={e => e.target.src = 'https://randomuser.me/api/portraits/lego/1.jpg'} />
+                    <div className={`absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full border-2 border-white ${item.type === 'IN' ? 'bg-emerald-500' : 'bg-blue-500'}`}></div>
                   </div>
                   <div>
                     <h4 className="text-sm font-semibold text-slate-900">{item.name}</h4>
-                    <p className="text-xs text-slate-500">{item.role} • MNV: {item.id}</p>
+                    <p className="text-[10px] text-slate-500 font-medium">{item.role}</p>
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="text-sm font-semibold text-slate-900">{item.time}</p>
-                  <div className="flex items-center gap-1 mt-1 justify-end">
-                    <span className="bg-blue-100 text-blue-700 text-[9px] font-bold px-1.5 py-0.5 rounded-md">{item.conf} ĐTC</span>
-                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md ${item.status === 'LATE' ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                      {item.type === 'IN' ? 'VÀO' : 'RA'} - {item.status === 'LATE' ? 'TRỄ' : 'ĐÚNG GIỜ'}
+                  <div className="flex items-center justify-end gap-1.5 mb-1">
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      item.type === 'IN' 
+                        ? (item.status === 'LATE' ? 'bg-orange-100 text-orange-700' : 'bg-emerald-100 text-emerald-700')
+                        : (item.status === 'EARLY_LEAVE' ? 'bg-blue-100 text-blue-700' : 'bg-indigo-100 text-indigo-700')
+                    }`}>
+                      {item.type === 'IN' ? (item.status === 'LATE' ? 'TRỄ GIỜ' : 'ĐÚNG GIỜ') : (item.status === 'EARLY_LEAVE' ? 'VỀ SỚM' : 'RA CA')}
                     </span>
+                    <span className="text-sm font-bold text-slate-900">{item.time}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 justify-end">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">{item.conf} ĐTC</span>
+                    {item.workHours && (
+                      <span className="flex items-center gap-1 bg-slate-900 text-white text-[9px] font-bold px-1.5 py-0.5 rounded">
+                        <Clock size={10} /> {item.workHours}h
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>

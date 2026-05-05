@@ -1,12 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, ActivityIndicator, Platform, TextInput, Modal, Image, StatusBar } from 'react-native';
-
-
+import { StyleSheet, Text, View, TouchableOpacity, ActivityIndicator, SafeAreaView, Platform, TextInput, Modal } from 'react-native';
 import { useCameraPermissions, CameraView } from 'expo-camera';
-// import * as FaceDetector from 'expo-face-detector'; // Tạm đóng vì không hỗ trợ Expo Go mới
+// import * as FaceDetector from 'expo-face-detector'; // Module này không còn hỗ trợ trên Expo Go mới
 import axios from 'axios';
 import * as OfflineManager from './src/services/OfflineManager';
 import NetInfo from '@react-native-community/netinfo';
+import * as Speech from 'expo-speech';
 import { Picker } from '@react-native-picker/picker';
 import { ScrollView } from 'react-native';
 
@@ -29,16 +28,13 @@ export default function App() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
 
-  // State cho chế độ Quét tự động (1 bước)
-  const [isScanning, setIsScanning] = useState(true);
-  const [lastCheckTime, setLastCheckTime] = useState(0);
-  const [hasFace, setHasFace] = useState(false);
-
-
-
+  const [livenessStep, setLivenessStep] = useState(0); // 0: Idle, 1: Center, 2: Blink, 3: Tilt
+  const [capturedImages, setCapturedImages] = useState([]);
+  const [selectedVoice, setSelectedVoice] = useState(null);
 
   useEffect(() => {
     OfflineManager.initDB();
+    setupVoices();
 
     // Sync logs every 1 minute
     const syncInterval = setInterval(() => {
@@ -48,67 +44,25 @@ export default function App() {
     return () => clearInterval(syncInterval);
   }, []);
 
-  // Tự động quét khuôn mặt liên tục
-  useEffect(() => {
-    let timer;
-    if (isScanning && !loading && !result && !showLogin) {
-      timer = setInterval(() => {
-        handleQuickScan();
-      }, 2000); // Thử quét mỗi 2 giây để giảm chớp màn hình
-    }
-    return () => clearInterval(timer);
-  }, [isScanning, loading, result, showLogin]);
-
-  const handleQuickScan = async () => {
-    if (!cameraRef.current || loading || result) return;
-    
-    const now = Date.now();
-    if (now - lastCheckTime < 2500) return;
-    setLastCheckTime(now);
-    setLoading(true); // Đánh dấu đang xử lý để tránh gọi chồng chéo
-
+  const setupVoices = async () => {
     try {
-      const photo = await cameraRef.current.takePictureAsync({ 
-        base64: true, 
-        quality: 0.5, // Tăng lên 0.5 để AI nhận diện chuẩn hơn
-        skipProcessing: true 
-      });
+      const voices = await Speech.getAvailableVoicesAsync();
+      const vnVoices = voices.filter(v => v.language.includes('vi'));
 
+      // Tìm giọng Nam (Ưu tiên các tên giọng nam phổ biến trên Android/iOS)
+      const maleVoice = vnVoices.find(v =>
+        v.name.toLowerCase().includes('minh') ||
+        v.name.toLowerCase().includes('nam') ||
+        v.name.toLowerCase().includes('an') ||
+        v.name.toLowerCase().includes('mạnh') ||
+        v.name.toLowerCase().includes('male')
+      ) || vnVoices[0];
 
-      
-      // Gọi endpoint Quick Scan (Gộp Liveness + Identify)
-      const res = await axios.post(`${BACKEND_URL}/api/face/quick-scan`, 
-        { image_base64: photo.base64 },
-        { headers: LT_HEADERS, timeout: 10000 }
-      );
-
-      if (res.data.matched) {
-        const employee = res.data.employee;
-        
-        // Ghi nhận điểm danh ngay
-        const endpoint = checkType === 'IN' ? '/api/attendance/checkin' : '/api/attendance/checkout';
-        const attRes = await axios.post(`${BACKEND_URL}${endpoint}`, {
-          employeeId: employee.id,
-          confidenceScore: res.data.confidence / 100,
-          type: checkType
-        }, { headers: LT_HEADERS });
-
-        setResult({
-          type: 'success',
-          message: `Xin chào, ${employee.fullName}!`,
-          employee: { ...employee, department: employee.department },
-          time: attRes.data.log?.checkTime
-        });
-
-        // Tự động ẩn kết quả sau 4 giây để quét người tiếp theo
-        setTimeout(() => {
-          setResult(null);
-        }, 4000);
+      if (maleVoice) {
+        setSelectedVoice(maleVoice.identifier);
       }
     } catch (e) {
-      console.log('Quick scan error:', e.message);
-    } finally {
-      setLoading(false);
+      console.log('Voice setup log:', e.message);
     }
   };
 
@@ -130,7 +84,7 @@ export default function App() {
       });
       setEmployees(res.data);
     } catch (error) {
-      console.error('Lỗi tải nhân viên:', error);
+      console.log('Employee fetch log:', error.message);
       if (error.response?.status === 401) {
         setIsAdmin(false);
         setAdminToken(null);
@@ -154,7 +108,9 @@ export default function App() {
         setResult({ type: 'error', message: 'Bạn không có quyền Admin' });
       }
     } catch (error) {
-      setResult({ type: 'error', message: 'Sai tài khoản hoặc mật khẩu' });
+      const msg = error.response?.data?.error || error.message || 'Lỗi kết nối server';
+      setResult({ type: 'error', message: `Đăng nhập thất bại: ${msg}` });
+      console.log('Login error:', error);
     } finally {
       setLoading(false);
     }
@@ -175,185 +131,254 @@ export default function App() {
     );
   }
 
-
-
-
-
-
-  // Xử lý phát hiện khuôn mặt
+  // Tạm thời tắt nhận diện nháy mắt local do Expo Go không hỗ trợ module native
   const handleFacesDetected = ({ faces }) => {
-    setHasFace(faces.length > 0);
+    // Logic này yêu cầu Development Build, không chạy được trên Expo Go mới.
+    // Chúng ta sẽ dùng nút bấm để chụp ảnh và AI Service sẽ kiểm tra liveness.
   };
 
-  /* 
-  if (loading || isAdmin || faces.length === 0 || result || status === 'Đang xử lý...') return;
-  // ... logic nháy mắt cũ ...
-  */
-
-  const challengeNames = {
-    blink: 'Hãy NHÁY MẮT',
-    left: 'Hãy quay đầu sang TRÁI',
-    right: 'Hãy quay đầu sang PHẢI'
+  // Hàm phát giọng nói hướng dẫn (Đã ưu tiên giọng Nam)
+  const speak = (text) => {
+    Speech.stop();
+    Speech.speak(text, {
+      language: 'vi-VN',
+      pitch: 0.9,  // Hạ cao độ xuống một chút để giọng trầm hơn (giọng Nam)
+      rate: 1.0,
+      voice: selectedVoice,
+    });
   };
 
-  const startAttendance = () => {
-    // Tạo chuỗi ngẫu nhiên
-    const baseActions = ['blink', 'left', 'right'];
-    const randomSeq = baseActions.sort(() => Math.random() - 0.5);
-    
-    setChallengeSequence(randomSeq);
-    setCurrentStep(1);
-    setStatus(`Bước 1: ${challengeNames[randomSeq[0]]}`);
+  const handleAttendance = async () => {
+    if (!cameraRef.current || loading) return;
+
+    setLoading(true);
     setResult(null);
-    setLivenessImages({ img1: null, img2: null, img3: null });
-  };
+    let capturedImg = null;
 
-  const captureStep = async () => {
-    if (!cameraRef.current) return;
-    setLoading(true);
     try {
-      const photo = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.5 });
-      const base64 = `data:image/jpg;base64,${photo.base64}`;
+      // Kiểm tra kết nối mạng trước khi bắt đầu
+      const netState = await NetInfo.fetch();
 
-      if (currentStep === 1) {
-        setLivenessImages(prev => ({ ...prev, img1: base64 }));
-        setCurrentStep(2);
-        setStatus(`Bước 2: ${challengeNames[challengeSequence[1]]}`);
-      } else if (currentStep === 2) {
-        setLivenessImages(prev => ({ ...prev, img2: base64 }));
-        setCurrentStep(3);
-        setStatus(`Bước 3: ${challengeNames[challengeSequence[2]]}`);
-      } else if (currentStep === 3) {
-        const finalImages = { ...livenessImages, img3: base64 };
-        setLivenessImages(finalImages);
-        handleVerifySequence(finalImages);
+      // BƯỚC 1: NHÌN THẲNG (3 GIÂY)
+      setLivenessStep(1);
+      const msg1 = 'Bước 1: Vui lòng nhìn thẳng vào camera trong 3 giây';
+      setStatus(msg1);
+      speak(msg1);
+      await new Promise(r => setTimeout(r, 2000));
+      const img1 = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.7 });
+      capturedImg = img1.base64;
+
+      // Nếu offline, cho phép lưu offline luôn sau bước 1 (bỏ qua liveness check vì không có server)
+      if (!netState.isConnected) {
+        OfflineManager.saveLogOffline(capturedImg, checkType);
+        const offMsg = 'Đã lưu điểm danh ngoại tuyến. Dữ liệu sẽ tự động đồng bộ khi có mạng.';
+        setResult({ type: 'success', message: offMsg });
+        speak(offMsg);
+        return;
       }
-    } catch (e) {
-      console.error(e);
-      setResult({ type: 'error', message: 'Lỗi khi chụp ảnh' });
-    } finally {
-      setLoading(false);
-    }
-  };
 
-  const handleVerifySequence = async (images) => {
-    setLoading(true);
-    setCurrentStep(4);
-    setStatus('Đang xác minh chuỗi hành động...');
+      // Kiểm tra bước 1 (Online)
+      setStatus('Đang kiểm tra tư thế nhìn thẳng...');
+      const check1 = await axios.post(`${BACKEND_URL}/api/v1/liveness-check`, { image_base64: capturedImg }, { headers: LT_HEADERS });
+      if (!check1.data.face_detected || check1.data.pose !== 'CENTER') {
+        throw new Error('Bạn chưa nhìn thẳng vào khung hình ở bước 1.');
+      }
 
-    try {
-      const aiRes = await axios.post(`${BACKEND_URL}/api/v1/verify_sequence`, {
-        image_1: images.img1,
-        image_2: images.img2,
-        image_3: images.img3,
-        sequence: challengeSequence
-      }, { headers: LT_HEADERS, timeout: API_TIMEOUT });
+      // BƯỚC 2: NHÁY MẮT (3 GIÂY)
+      setLivenessStep(2);
+      const msg2 = 'Bước 2:Bây giờ hãy nháy mắt liên tục';
+      setStatus(msg2);
+      speak(msg2);
+      await new Promise(r => setTimeout(r, 2000));
+      const img2 = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.5 });
 
+      // Kiểm tra bước 2
+      setStatus('Đang kiểm tra nháy mắt...');
+      const check2 = await axios.post(`${BACKEND_URL}/api/v1/liveness-check`, { image_base64: img2.base64 }, { headers: LT_HEADERS });
+      if (check2.data.eyes !== 'CLOSED' && check2.data.ear > 0.25) { // Nới lỏng EAR từ 0.22 lên 0.25
+        console.log('Blink failed, but proceeding if EAR is low enough:', check2.data.ear);
+        // Nếu không phát hiện nhắm hẳn nhưng EAR giảm đáng kể, vẫn cho qua
+        if (check2.data.ear > 0.30) throw new Error('Hệ thống không thấy bạn nháy mắt ở bước 2.');
+      }
+
+      // BƯỚC 3: NGHIÊNG MẶT (4 GIÂY)
+      setLivenessStep(3);
+      const msg3 = 'Bước 3: Nghiêng đầu sang một bên';
+      setStatus(msg3);
+      speak(msg3);
+      await new Promise(r => setTimeout(r, 2000));
+      const img3 = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.5 });
+
+      // Kiểm tra bước 3
+      setStatus('Đang kiểm tra nghiêng đầu...');
+      const check3 = await axios.post(`${BACKEND_URL}/api/v1/liveness-check`, { image_base64: img3.base64 }, { headers: LT_HEADERS });
+      if (check3.data.pose === 'CENTER') {
+        throw new Error('Vui lòng nghiêng đầu sang trái hoặc phải ở bước 3.');
+      }
+
+      setLivenessStep(0);
+      const msgFinal = 'Xác thực thành công! Đang đối chiếu hồ sơ...';
+      setStatus(msgFinal);
+      speak(msgFinal);
+
+      // Gửi ảnh 1 để nhận diện
+      const aiRes = await axios.post(`${BACKEND_URL}/api/v1/extract`,
+        { image_base64: capturedImg },
+        { headers: LT_HEADERS, timeout: API_TIMEOUT }
+      );
 
       if (!aiRes.data.success) {
-        setResult({ type: 'error', message: aiRes.data.error });
-        setCurrentStep(0);
-        return;
+        throw new Error(aiRes.data.error || 'Lỗi nhận diện khuôn mặt');
       }
 
-      // 2. Nếu liveness ok, tiến hành nhận diện (Backend đã trả về embedding)
-      setStatus('Đang nhận diện khuôn mặt...');
-      const idRes = await axios.post(`${BACKEND_URL}/api/face/identify`, {
-        embedding: aiRes.data.embedding,
-        livenessScore: 1.0
-      }, { headers: LT_HEADERS, timeout: API_TIMEOUT });
+      const idRes = await axios.post(`${BACKEND_URL}/api/face/identify`,
+        {
+          embedding: aiRes.data.embedding,
+          livenessScore: 0.99
+        },
+        { headers: LT_HEADERS, timeout: API_TIMEOUT }
+      );
 
       if (!idRes.data.matched) {
-        setResult({ type: 'error', message: 'Khuôn mặt không có trong hệ thống.' });
-        setCurrentStep(0);
-        return;
+        throw new Error('Khuôn mặt không khớp với hồ sơ nhân viên nào.');
       }
 
       const employee = idRes.data.employee;
       const endpoint = checkType === 'IN' ? '/api/attendance/checkin' : '/api/attendance/checkout';
-      
-      setStatus(`Ghi nhận giờ ${checkType === 'IN' ? 'Vào' : 'Ra'}...`);
+
       const attRes = await axios.post(`${BACKEND_URL}${endpoint}`, {
         employeeId: employee.id,
         confidenceScore: idRes.data.confidence / 100,
         type: checkType
       }, { headers: LT_HEADERS, timeout: API_TIMEOUT });
 
-      setResult({
-        type: 'success',
-        message: `Xin chào, ${employee.fullName}!`,
-        employee: employee, // Lưu thông tin nhân viên để hiện Card
-        time: attRes.data.log?.checkTime
-      });
+      const typeText = checkType === 'IN' ? 'Chào mừng' : 'Cảm ơn';
+      let successMsg = `${typeText} ${employee.fullName} đã điểm danh thành công.`;
 
-      // Tự động quay lại trạng thái chờ sau 3 giây
-      setTimeout(() => {
-        setResult(null);
-        setCurrentStep(0);
-        setStatus('Sẵn sàng điểm danh');
-      }, 3500);
+      if (checkType === 'OUT' && attRes.data.log?.workHours) {
+        successMsg += `\nThời gian làm việc: ${attRes.data.log.workHours} giờ.`;
+      }
+
+      setResult({ type: 'success', message: successMsg, time: attRes.data.log?.checkTime });
+      speak(successMsg);
 
     } catch (error) {
+      console.log('Attendance process log:', error.message);
 
-      console.error(error);
-      setResult({ type: 'error', message: 'Lỗi kết nối máy chủ' });
-      setCurrentStep(0);
+      // Xử lý lỗi kết nối (Server chết hoặc mất mạng đột ngột)
+      if ((error.message.includes('Network Error') || error.code === 'ECONNABORTED') && capturedImg) {
+        OfflineManager.saveLogOffline(capturedImg, checkType);
+        const offMsg = 'Lỗi kết nối! Đã tự động lưu điểm danh ngoại tuyến.';
+        setResult({ type: 'success', message: offMsg });
+        speak(offMsg);
+      } else {
+        const errorMsg = error.response?.data?.error || error.message || 'Lỗi quy trình, vui lòng thử lại';
+        setResult({ type: 'error', message: errorMsg });
+        speak(errorMsg);
+      }
     } finally {
       setLoading(false);
+      setLivenessStep(0);
       setStatus('Sẵn sàng điểm danh');
     }
   };
 
 
   const handleEnrollment = async () => {
-    if (!cameraRef.current || !selectedEmployee) return;
+    if (!cameraRef.current || !selectedEmployee || loading) return;
 
     setLoading(true);
-    setStatus('Đang lấy mẫu khuôn mặt...');
     setResult(null);
 
     try {
-      const photo = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.7 });
+      // BƯỚC 1: NHÌN THẲNG (3 GIÂY)
+      setLivenessStep(1);
+      const emp = employees.find(e => e.id === selectedEmployee);
+      const msg1 = `Bắt đầu đăng ký cho ${emp?.name || 'nhân viên'}. Bước 1: Nhìn thẳng 2 giây.`;
+      setStatus(msg1);
+      speak(msg1);
+      await new Promise(r => setTimeout(r, 2000));
+      const img1 = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.7 });
 
-      // 1. Trích xuất embedding
-      // SỬA LỖI: Sử dụng Backend Proxy cho đăng ký khuôn mặt
+      setStatus('Đang kiểm tra mẫu nhìn thẳng...');
+      const check1 = await axios.post(`${BACKEND_URL}/api/v1/liveness-check`, { image_base64: img1.base64 }, { headers: LT_HEADERS });
+      if (!check1.data.face_detected || check1.data.pose !== 'CENTER') {
+        throw new Error('Vui lòng nhìn thẳng vào camera để lấy mẫu chuẩn.');
+      }
+
+      // BƯỚC 2: NHÁY MẮT (3 GIÂY)
+      setLivenessStep(2);
+      const msg2 = 'Bước 2: Nháy mắt liên tục để xác thực người thật.';
+      setStatus(msg2);
+      speak(msg2);
+      await new Promise(r => setTimeout(r, 2000));
+      const img2 = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.5 });
+
+      setStatus('Đang kiểm tra nháy mắt...');
+      const check2 = await axios.post(`${BACKEND_URL}/api/v1/liveness-check`, { image_base64: img2.base64 }, { headers: LT_HEADERS });
+      if (check2.data.eyes !== 'CLOSED' && check2.data.ear > 0.25) {
+        console.log('Enrollment Blink logic check:', check2.data.ear);
+        if (check2.data.ear > 0.30) throw new Error('Đăng ký thất bại: Không nhận diện được hành động nháy mắt.');
+      }
+
+      // BƯỚC 3: NGHIÊNG MẶT (3 GIÂY)
+      setLivenessStep(3);
+      const msg3 = 'Bước 3: Nghiêng đầu nhẹ sang một bên.';
+      setStatus(msg3);
+      speak(msg3);
+      await new Promise(r => setTimeout(r, 3000));
+      const img3 = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.5 });
+
+      setStatus('Đang kiểm tra góc nghiêng...');
+      const check3 = await axios.post(`${BACKEND_URL}/api/v1/liveness-check`, { image_base64: img3.base64 }, { headers: LT_HEADERS });
+      if (check3.data.pose === 'CENTER') {
+        throw new Error('Đăng ký thất bại: Vui lòng nghiêng đầu để xác thực 3D.');
+      }
+
+      setLivenessStep(0);
+      setStatus('Tuyệt vời! Đang xử lý mẫu khuôn mặt...');
+      speak('Đã lấy mẫu thành công, đang cập nhật hồ sơ');
+
+      // 1. Trích xuất embedding từ ảnh đẹp nhất (ảnh 1)
       const aiRes = await axios.post(`${BACKEND_URL}/api/v1/extract`,
-        { image_base64: photo.base64 },
+        { image_base64: img1.base64 },
         { headers: LT_HEADERS, timeout: API_TIMEOUT }
       );
 
       if (!aiRes.data.success) {
-        setResult({ type: 'error', message: aiRes.data.error });
-        setLoading(false);
-        return;
+        throw new Error(aiRes.data.error || 'AI không thể trích xuất đặc điểm khuôn mặt.');
       }
 
       // 2. Cập nhật vào Backend
-      await axios.put(`${BACKEND_URL}/api/employees/${selectedEmployee}`, {
+      await axios.put(`${BACKEND_URL}/api/employees/${selectedEmployee}/face`, {
         faceEmbedding: aiRes.data.embedding
       }, {
         headers: {
           Authorization: `Bearer ${adminToken}`,
           ...LT_HEADERS
-        },
-        timeout: API_TIMEOUT
+        }
       });
 
-      setResult({ type: 'success', message: 'Đăng ký khuôn mặt thành công!' });
+      const successMsg = `Đã cập nhật khuôn mặt thành công cho ${selectedEmployee.fullName}`;
+      setResult({ type: 'success', message: successMsg });
+      speak(successMsg);
+      fetchEmployees(); // Refresh list
+
     } catch (error) {
-      console.error(error);
-      setResult({ type: 'error', message: 'Lỗi đăng ký khuôn mặt' });
+      console.log('Enrollment process log:', error.message);
+      const errorMsg = error.response?.data?.error || error.message || 'Lỗi khi đăng ký khuôn mặt';
+      setResult({ type: 'error', message: errorMsg });
+      speak(errorMsg);
     } finally {
       setLoading(false);
-      setStatus('Admin Mode');
+      setLivenessStep(0);
+      setStatus('Sẵn sàng');
     }
   };
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" />
+    <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-
         <View style={styles.topRow}>
           <Text style={styles.title}>{isAdmin ? 'Face Enrollment' : 'BioHR Mobile Kiosk'}</Text>
           <TouchableOpacity
@@ -363,7 +388,7 @@ export default function App() {
             <Text style={styles.adminToggleText}>{isAdmin ? 'Thoát Admin' : 'Đăng nhập Admin'}</Text>
           </TouchableOpacity>
         </View>
-        <Text style={styles.subtitle}>{isAdmin ? 'Chọn nhân viên và quét mặt để đăng ký' : 'Giơ khuôn mặt vào giữa khung hình'}</Text>
+        <Text style={styles.subtitle}>{isAdmin ? 'Chọn nhân viên và bấm để đăng ký' : 'Giơ khuôn mặt vào khung và bấm nút để điểm danh'}</Text>
 
         {isAdmin ? (
           <View style={styles.adminContainer}>
@@ -420,32 +445,23 @@ export default function App() {
 
       <View style={styles.cameraContainer}>
         <CameraView
+          key="front_camera"
           ref={cameraRef}
           style={styles.camera}
-          facing={isAdmin ? "back" : "front"}
-          flash="off"
-          shutterSound={false}
-
-
-          /* faceDetectorSettings={{
-            mode: FaceDetector.FaceDetectorMode.fast,
-            detectLandmarks: FaceDetector.FaceDetectorLandmarks.all,
-            runClassifications: FaceDetector.FaceDetectorClassifications.all,
-            minDetectionInterval: 150,
-            tracking: true,
-          }} */
-        />
-        {/* Lớp phủ hướng dẫn */}
-        <View style={styles.overlay} pointerEvents="none">
-          <View style={styles.scanBox}>
-              {!result && !loading && (
-                <View style={styles.stepIndicator}>
-                  <Text style={styles.stepIndicatorText}>Đang quét khuôn mặt...</Text>
-                </View>
-              )}
+          facing="front"
+        // onFacesDetected={handleFacesDetected}
+        // faceDetectorSettings={{
+        //   mode: FaceDetector.FaceDetectorMode.fast,
+        //   detectLandmarks: FaceDetector.FaceDetectorLandmarks.all,
+        //   runClassifications: FaceDetector.FaceDetectorClassifications.all,
+        //   minDetectionInterval: 150,
+        //   tracking: true,
+        // }}
+        >
+          <View style={styles.overlay}>
+            <View style={styles.scanBox} />
           </View>
-        </View>
-
+        </CameraView>
       </View>
 
       <View style={styles.footer}>
@@ -456,41 +472,32 @@ export default function App() {
           </View>
         ) : (
           <>
-            {result && result.type === 'success' && result.employee ? (
-              <View style={styles.employeeCard}>
-                <View style={styles.cardHeader}>
-                  {result.employee.avatarUrl ? (
-                    <Image source={{ uri: result.employee.avatarUrl }} style={styles.cardAvatar} />
-                  ) : (
-                    <View style={styles.cardAvatarPlaceholder}>
-                      <Text style={styles.avatarText}>{result.employee.fullName.charAt(0)}</Text>
-                    </View>
-                  )}
-                  <View style={styles.cardInfo}>
-                    <Text style={styles.cardName}>{result.employee.fullName}</Text>
-                    <Text style={styles.cardDept}>{result.employee.department}</Text>
-                  </View>
-                </View>
-                <View style={styles.cardDivider} />
-                <View style={styles.cardFooter}>
-                  <Text style={styles.checkTimeText}>🕒 {result.time ? new Date(result.time).toLocaleTimeString('vi-VN') : new Date().toLocaleTimeString('vi-VN')}</Text>
-                  <Text style={styles.successBadge}>ĐÃ GHI NHẬN</Text>
-                </View>
+            {livenessStep > 0 && (
+              <View style={[styles.stepIndicator, livenessStep === 1 ? styles.stepBlue : livenessStep === 2 ? styles.stepYellow : styles.stepGreen]}>
+                <Text style={styles.stepIcon}>{livenessStep === 1 ? '👤' : livenessStep === 2 ? '👁️' : '↪️'}</Text>
+                <Text style={styles.stepText}>{status}</Text>
               </View>
-            ) : result && (
+            )}
+
+            {result && livenessStep === 0 && (
               <View style={[styles.resultBox, result.type === 'success' ? styles.resultSuccess : styles.resultError]}>
                 <Text style={styles.resultText}>{result.message}</Text>
+                {result.time && <Text style={styles.timeText}>Thời gian: {new Date(result.time).toLocaleTimeString('vi-VN')}</Text>}
               </View>
             )}
 
-            {!result && (
-              <Text style={styles.instructionText}>
-                {isAdmin ? 'Đang ở chế độ Admin' : `Vui lòng đưa mặt vào khung hình để điểm danh`}
-              </Text>
-            )}
+            <TouchableOpacity
+              style={[styles.captureButton, isAdmin && styles.enrollButton, livenessStep > 0 && styles.captureButtonDisabled]}
+              onPress={isAdmin ? handleEnrollment : handleAttendance}
+              disabled={livenessStep > 0}
+            >
+              <View style={[styles.captureButtonInner, isAdmin && styles.enrollButtonInner, livenessStep > 0 && { backgroundColor: '#ccc' }]} />
+            </TouchableOpacity>
+            <Text style={styles.instructionText}>
+              {isAdmin ? 'Bấm để Đăng ký Khuôn mặt' : `Bấm để Điểm danh ${checkType === 'IN' ? 'Vào ca' : 'Ra ca'}`}
+            </Text>
           </>
         )}
-
       </View>
 
       <Modal visible={showLogin} transparent animationType="slide">
@@ -520,10 +527,9 @@ export default function App() {
           </View>
         </View>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 }
-
 
 const styles = StyleSheet.create({
   container: {
@@ -628,6 +634,60 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 14,
   },
+  voiceSection: {
+    marginTop: 15,
+    paddingTop: 15,
+    borderTopWidth: 1,
+    borderTopColor: '#334155',
+  },
+  voiceLabel: {
+    color: '#94a3b8',
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+  },
+  pickerWrapper: {
+    backgroundColor: '#1e293b',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#334155',
+    overflow: 'hidden',
+  },
+  picker: {
+    color: '#ffffff',
+    height: 50,
+    width: '100%',
+  },
+  noVoiceBox: {
+    padding: 10,
+    backgroundColor: '#334155',
+    borderRadius: 12,
+  },
+  noVoiceText: {
+    color: '#fbbf24',
+    fontSize: 13,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  refreshBtn: {
+    backgroundColor: '#3b82f6',
+    padding: 8,
+    borderRadius: 8,
+    marginTop: 10,
+    alignItems: 'center',
+  },
+  refreshBtnText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  hintText: {
+    color: '#94a3b8',
+    fontSize: 11,
+    marginTop: 8,
+    fontStyle: 'italic',
+  },
   toggleTextActive: {
     color: '#ffffff',
   },
@@ -639,53 +699,23 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#334155',
   },
-  activeStepButton: {
-    backgroundColor: 'rgba(234, 179, 8, 0.3)',
-    borderColor: '#eab308',
-    borderWidth: 2,
-  },
-  stepIndicator: {
-    backgroundColor: 'rgba(234, 179, 8, 0.9)',
-    padding: 10,
-    borderRadius: 8,
-    position: 'absolute',
-    top: -50,
-    width: '120%',
-    left: '-10%',
-    alignItems: 'center',
-  },
-  stepIndicatorText: {
-    color: '#000',
-    fontWeight: 'bold',
-    fontSize: 14,
-    textAlign: 'center',
-  },
-
-
   camera: {
     flex: 1,
   },
   overlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    flex: 1,
     backgroundColor: 'rgba(0,0,0,0.3)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   scanBox: {
-    width: 280,
-    height: 280,
-    borderWidth: 2,
+    width: 250,
+    height: 300,
+    borderWidth: 3,
     borderColor: '#3b82f6',
-    borderRadius: 140, // Hình tròn cho đẹp
+    borderRadius: 20,
     backgroundColor: 'transparent',
-    justifyContent: 'center',
-    alignItems: 'center',
   },
-
   footer: {
     padding: 30,
     alignItems: 'center',
@@ -836,79 +866,25 @@ const styles = StyleSheet.create({
     color: '#64748b',
     fontSize: 14,
   },
-  employeeCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 18,
-    width: '100%',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 5,
-    borderLeftWidth: 5,
-    borderLeftColor: '#10b981',
-    marginVertical: 10,
+  stepIndicator: {
+    backgroundColor: '#3b82f6',
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginBottom: 15,
+    borderWidth: 1,
+    borderColor: '#60a5fa',
   },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  cardAvatar: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    marginRight: 15,
-  },
-  cardAvatarPlaceholder: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#f1f5f9',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 15,
-  },
-  avatarText: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#3b82f6',
-  },
-  cardInfo: {
-    flex: 1,
-  },
-  cardName: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#1e293b',
-  },
-  cardDept: {
+  stepText: {
+    color: '#ffffff',
     fontSize: 14,
-    color: '#64748b',
-    marginTop: 2,
-  },
-  cardDivider: {
-    height: 1,
-    backgroundColor: '#f1f5f9',
-    marginVertical: 12,
-  },
-  cardFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  checkTimeText: {
-    fontSize: 14,
-    color: '#475569',
-    fontWeight: '500',
-  },
-  successBadge: {
-    backgroundColor: '#ecfdf5',
-    color: '#059669',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 6,
-    fontSize: 12,
     fontWeight: 'bold',
   },
+  captureButtonDisabled: {
+    opacity: 0.5,
+  },
+  stepBlue: { backgroundColor: '#2563eb', borderColor: '#60a5fa' },
+  stepYellow: { backgroundColor: '#d97706', borderColor: '#fbbf24' },
+  stepGreen: { backgroundColor: '#059669', borderColor: '#34d399' },
+  stepIcon: { fontSize: 24, marginBottom: 5 },
 });

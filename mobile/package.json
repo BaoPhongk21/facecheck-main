@@ -16,6 +16,7 @@
     "expo": "~54.0.33",
     "expo-camera": "~17.0.10",
     "expo-face-detector": "^13.0.2",
+    "expo-speech": "~14.0.8",
     "expo-sqlite": "~16.0.10",
     "expo-status-bar": "~3.0.9",
     "react": "19.1.0",

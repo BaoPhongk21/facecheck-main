@@ -21,7 +21,7 @@ function updateBackendUrl(newUrl) {
 
 // Start Cloudflare Tunnel
 console.log('🚀 Starting Cloudflare Tunnel...');
-const tunnel = spawn('npx', ['cloudflared', 'tunnel', '--url', 'http://localhost:5000'], {
+const tunnel = spawn('npx', ['cloudflared@latest', 'tunnel', '--protocol', 'http2', '--url', 'http://localhost:5000'], {
   cwd: process.cwd(),
   shell: true,
 });
