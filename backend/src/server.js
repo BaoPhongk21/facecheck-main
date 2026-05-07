@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const csv = require('csv-parser');
 const multer = require('multer');
+const ExcelJS = require('exceljs');
 
 const upload = multer({ dest: 'uploads/' });
 
@@ -18,6 +19,42 @@ const app = express();
 const prisma = new PrismaClient();
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkey123';
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://localhost:8000';
+
+// ── Global Helper Functions ──
+const cosineSim = (a, b) => {
+  const dot = a.reduce((s, v, i) => s + v * b[i], 0);
+  const nA = Math.sqrt(a.reduce((s, v) => s + v * v, 0));
+  const nB = Math.sqrt(b.reduce((s, v) => s + v * v, 0));
+  return dot / (nA * nB);
+};
+
+// Helper function to record spoofing attempts
+const recordSpoofingAttempt = async (employeeId, livenessScore, imageBase64, req) => {
+  try {
+    await prisma.spoofingAttempt.create({
+      data: {
+        employeeId: employeeId, // Can be null if employee not identified yet
+        livenessScore: livenessScore,
+        imageBase64: imageBase64, // WARNING: Storing base64 directly in DB can lead to very large DB size and performance issues. Consider storing path to file in cloud storage (S3) or local filesystem instead.
+        timestamp: new Date(),
+        ipAddress: req.ip,
+        deviceInfo: req.headers['user-agent'],
+      },
+    });
+    console.log(`🚨 Spoofing attempt recorded for employeeId: ${employeeId || 'N/A'} with score: ${livenessScore}`);
+  } catch (error) {
+    console.error('Error recording spoofing attempt:', error);
+  }
+};
+
+const minDate = (d1, d2) => (d1 < d2 ? d1 : d2);
+
+const getMinutesDiff = (min1, min2) => {
+  let diff = min1 - min2;
+  if (diff > 720) diff -= 1440;
+  else if (diff < -720) diff += 1440;
+  return diff;
+};
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
@@ -546,30 +583,22 @@ app.post('/api/attendance/checkin', async (req, res) => {
 
     if (shifts.length > 0) {
       const currentMin = hour * 60 + minute;
-      let minDiff = Infinity;
 
-      for (const s of shifts) {
-        const [sHr, sMin] = s.startTime.split(':').map(Number);
-        const startMin = sHr * 60 + sMin;
-
-        let diff = currentMin - startMin;
-        if (diff > 720) diff -= 1440;
-        else if (diff < -720) diff += 1440;
-
-        if (Math.abs(diff) < minDiff) {
-          minDiff = Math.abs(diff);
-          assignedShift = s;
-        }
-      }
+      // Tìm ca có giờ bắt đầu gần với thời điểm check-in nhất
+      assignedShift = shifts.reduce((prev, curr) => {
+        const [pHr, pMin] = prev.startTime.split(':').map(Number);
+        const [cHr, cMin] = curr.startTime.split(':').map(Number);
+        const pDiff = Math.abs(getMinutesDiff(currentMin, pHr * 60 + pMin));
+        const cDiff = Math.abs(getMinutesDiff(currentMin, cHr * 60 + cMin));
+        return cDiff < pDiff ? curr : prev;
+      });
 
       if (assignedShift) {
         const [sHr, sMin] = assignedShift.startTime.split(':').map(Number);
         const allowedLate = assignedShift.lateAfterMinutes || 0;
         const startMin = sHr * 60 + sMin;
 
-        let checkinDiff = currentMin - startMin;
-        if (checkinDiff > 720) checkinDiff -= 1440;
-        else if (checkinDiff < -720) checkinDiff += 1440;
+        const checkinDiff = getMinutesDiff(currentMin, startMin);
 
         if (checkinDiff > allowedLate) {
           isLate = true;
@@ -650,7 +679,7 @@ app.post('/api/attendance/checkout', async (req, res) => {
 
     if (shifts.length > 0) {
       const currentMin = hour * 60 + minute;
-      
+
       // Tìm giờ vào (IN) đầu tiên trong ngày hôm nay
       const startOfDay = new Date(logTime);
       startOfDay.setHours(0, 0, 0, 0);
@@ -663,18 +692,22 @@ app.post('/api/attendance/checkout', async (req, res) => {
         // Nếu đã có giờ vào, tìm ca có giờ BẮT ĐẦU gần nhất với giờ vào đó
         const inTime = new Date(inLog.checkTime);
         const inMin = inTime.getHours() * 60 + inTime.getMinutes();
-        
+
         assignedShift = shifts.reduce((prev, curr) => {
           const [pH, pM] = prev.startTime.split(':').map(Number);
           const [cH, cM] = curr.startTime.split(':').map(Number);
-          return Math.abs(cH * 60 + cM - inMin) < Math.abs(pH * 60 + pM - inMin) ? curr : prev;
+          const pD = Math.abs(getMinutesDiff(inMin, pH * 60 + pM));
+          const cD = Math.abs(getMinutesDiff(inMin, cH * 60 + cM));
+          return cD < pD ? curr : prev;
         });
       } else {
         // Nếu không có giờ vào (quên quẹt sáng), tìm ca có giờ kết thúc gần nhất với hiện tại
         assignedShift = shifts.reduce((prev, curr) => {
           const [pHe, pMe] = prev.endTime.split(':').map(Number);
           const [cHe, cMe] = curr.endTime.split(':').map(Number);
-          return Math.abs(cHe * 60 + cMe - currentMin) < Math.abs(pHe * 60 + pMe - currentMin) ? curr : prev;
+          const pD = Math.abs(getMinutesDiff(currentMin, pHe * 60 + pMe));
+          const cD = Math.abs(getMinutesDiff(currentMin, cHe * 60 + cMe));
+          return cD < pD ? curr : prev;
         });
       }
 
@@ -726,7 +759,7 @@ app.post('/api/attendance/checkout', async (req, res) => {
         role: log.employee.department.name,
         time: new Date(log.checkTime).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
         conf: `${((log.confidenceScore || 0.99) * 100).toFixed(1)}%`,
-        status: 'ON_TIME',
+        status: log.status, // Sửa lỗi: Sử dụng trạng thái thực tế từ database
         type: 'OUT',
         avatar: log.employee.avatarUrl,
         workHours
@@ -799,13 +832,6 @@ app.post('/api/face/quick-scan', async (req, res) => {
       return res.json({ matched: false, aiData, message: 'Chưa có nhân viên nào đăng ký khuôn mặt' });
     }
 
-    const cosineSim = (a, b) => {
-      const dot = a.reduce((s, v, i) => s + v * b[i], 0);
-      const nA = Math.sqrt(a.reduce((s, v) => s + v * v, 0));
-      const nB = Math.sqrt(b.reduce((s, v) => s + v * v, 0));
-      return dot / (nA * nB);
-    };
-
     let bestMatch = null, bestScore = -1;
     for (const emp of enrolledEmployees) {
       if (emp.faceEmbedding.length !== embedding.length) continue;
@@ -837,27 +863,264 @@ app.post('/api/face/quick-scan', async (req, res) => {
   }
 });
 
+// ─────────── QUICK ENROLL (Enroll by Image) ───────────
+app.post('/api/face/enroll-by-image', adminAuth, async (req, res) => {
+  try {
+    const { employeeId, image_base64 } = req.body;
+    if (!employeeId || !image_base64) return res.status(400).json({ error: 'Thiếu thông tin đăng ký' });
+
+    // 1. Trích xuất embedding từ ảnh
+    const aiResponse = await fetch(`${AI_SERVICE_URL}/api/v1/extract`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image_base64 }),
+      signal: AbortSignal.timeout(60000)
+    });
+
+    const aiData = await aiResponse.json();
+    if (!aiData.success || !aiData.embedding) {
+      return res.status(400).json({ error: aiData.error || 'Không tìm thấy khuôn mặt trong ảnh' });
+    }
+
+    // 2. Kiểm tra liveness cơ bản (nếu AI service hỗ trợ)
+    if (aiData.liveness_score !== undefined && aiData.liveness_score < 0.6) {
+      return res.status(400).json({ error: 'Ảnh không đạt chuẩn hoặc phát hiện giả mạo (Liveness thấp)' });
+    }
+
+    // 3. Lưu vào DB
+    await prisma.employee.update({
+      where: { id: employeeId },
+      data: { faceEmbedding: aiData.embedding }
+    });
+
+    res.json({ success: true, message: 'Đã quét và lưu khuôn mặt mới thành công!' });
+  } catch (error) {
+    console.error('Enroll Error:', error);
+    res.status(500).json({ error: 'Lỗi máy chủ khi đăng ký khuôn mặt' });
+  }
+});
+
+// ─────────── MULTI-IMAGE ENROLL (Enroll by multiple images with head rotation) ───────────
+app.post('/api/face/enroll-multi-images', adminAuth, async (req, res) => {
+  try {
+    const { employeeId, images_base64 } = req.body; // Expect an array of base64 images
+    if (!Array.isArray(images_base64) || images_base64.length === 0) {
+      return res.status(400).json({ error: 'Thiếu thông tin đăng ký hoặc ảnh không hợp lệ' });
+    }
+
+    const embeddings = [];
+    for (const image_base64 of images_base64) {
+      // 1. Trích xuất embedding từ mỗi ảnh
+      const aiResponse = await fetch(`${AI_SERVICE_URL}/api/v1/extract`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_base64 }),
+        signal: AbortSignal.timeout(60000)
+      });
+
+      const aiData = await aiResponse.json();
+      if (!aiData.success || !aiData.embedding) {
+        // Nếu không tìm thấy khuôn mặt trong 1 trong các ảnh, coi như lỗi
+        return res.status(400).json({ error: aiData.error || 'Không tìm thấy khuôn mặt trong một trong các ảnh' });
+      }
+
+      // 2. Kiểm tra liveness cơ bản cho mỗi ảnh (ngưỡng cao hơn cho enrollment để đảm bảo chất lượng)
+      // Việc quay đầu là một dạng liveness chủ động, nhưng vẫn cần liveness thụ động từ AI.
+      const ENROLL_LIVENESS_THRESHOLD = 0.7; // Ngưỡng cao hơn để đảm bảo ảnh gốc là người thật
+      if (aiData.liveness_score !== undefined && aiData.liveness_score < ENROLL_LIVENESS_THRESHOLD) {
+        return res.status(400).json({ error: 'Một trong các ảnh không đạt chuẩn hoặc phát hiện giả mạo (Liveness thấp)' });
+      }
+      embeddings.push(aiData.embedding);
+    }
+
+    // 3. Tính trung bình các embeddings để tạo ra một embedding tổng hợp và ổn định hơn
+    if (embeddings.length === 0) {
+      return res.status(400).json({ error: 'Không thể trích xuất embedding từ bất kỳ ảnh nào' });
+    }
+
+    const averagedEmbedding = embeddings[0].map((_, i) =>
+      embeddings.reduce((sum, currentEmbedding) => sum + currentEmbedding[i], 0) / embeddings.length
+    );
+
+    // 4. Lưu vào DB
+    if (employeeId) {
+      await prisma.employee.update({
+        where: { id: employeeId },
+        data: { faceEmbedding: averagedEmbedding }
+      });
+    }
+
+    res.json({ success: true, message: 'Xác thực khuôn mặt thành công!', embedding: averagedEmbedding });
+  } catch (error) {
+    console.error('Multi-Image Enroll Error:', error);
+    res.status(500).json({ error: 'Lỗi máy chủ khi đăng ký khuôn mặt từ nhiều ảnh' });
+  }
+});
+
+// ─────────── AUTO ATTENDANCE (Scan -> Identify -> Log) ───────────
+app.post('/api/face/auto-attendance', async (req, res) => {
+  try {
+    const { image_base64, type = 'IN' } = req.body;
+    if (!image_base64) return res.status(400).json({ error: 'Thiếu dữ liệu hình ảnh' });
+
+    // 1. Nhận diện (Sử dụng logic tương tự Quick Scan)
+    const aiResponse = await fetch(`${AI_SERVICE_URL}/api/v1/extract`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image_base64 }),
+      signal: AbortSignal.timeout(60000)
+    });
+
+    const aiData = await aiResponse.json();
+    if (!aiData.success || !aiData.embedding) return res.json({ matched: false, message: 'Không tìm thấy khuôn mặt' });
+
+    // 1.5 KIỂM TRA THỰC THỂ SỐNG (LIVENESS CHECK) - SIẾT CHẶT
+    // Ngưỡng 0.7 thường là ngưỡng an toàn để loại bỏ ảnh/video chất lượng cao
+    const LIVENESS_THRESHOLD = 0.7;
+    if (aiData.liveness_score !== undefined && aiData.liveness_score < LIVENESS_THRESHOLD) {
+      console.warn(`🚨 Cảnh báo gian lận: Phát hiện giả mạo với điểm số ${aiData.liveness_score}`);
+
+      // Cố gắng nhận diện danh tính kể cả khi liveness thấp để ghi log bảo mật
+      const employeesForSpoof = await prisma.employee.findMany({ where: { isActive: true } });
+      let bestMatchForSpoof = null, bestScoreForSpoof = -1;
+      for (const emp of employeesForSpoof) {
+        if (!emp.faceEmbedding || emp.faceEmbedding.length !== aiData.embedding.length) continue;
+        const score = cosineSim(aiData.embedding, emp.faceEmbedding);
+        if (score > bestScoreForSpoof) { bestScoreForSpoof = score; bestMatchForSpoof = emp; }
+      }
+      const identifiedEmployeeId = (bestScoreForSpoof >= 0.60 && bestMatchForSpoof) ? bestMatchForSpoof.id : null;
+
+      await recordSpoofingAttempt(identifiedEmployeeId, aiData.liveness_score, image_base64, req);
+
+      return res.status(403).json({
+        matched: false,
+        error: 'CẢNH BÁO: Hệ thống phát hiện sử dụng ảnh/video giả mạo. Vui lòng dùng người thật!',
+        isSpoofing: true
+      });
+    }
+
+    // 2. Tìm nhân viên
+    const employees = await prisma.employee.findMany({ where: { isActive: true }, include: { department: true } });
+    const enrolled = employees.filter(e => Array.isArray(e.faceEmbedding) && e.faceEmbedding.length > 0);
+
+    let bestMatch = null, bestScore = -1;
+    for (const emp of enrolled) {
+      const score = cosineSim(aiData.embedding, emp.faceEmbedding);
+      if (score > bestScore) { bestScore = score; bestMatch = emp; }
+    }
+
+    if (bestScore < 0.60 || !bestMatch) {
+      return res.json({ matched: false, message: 'Khuôn mặt chưa được đăng ký trong hệ thống' });
+    }
+
+    // 3. TỰ ĐỘNG GHI LOG CHẤM CÔNG (Vào ca/Ra ca)
+    const logTime = new Date();
+    const hour = logTime.getHours();
+    const minute = logTime.getMinutes();
+    let status = 'ON_TIME';
+
+    if (type === 'IN') {
+      const shifts = await prisma.shift.findMany({ orderBy: { startTime: 'asc' } });
+      if (shifts.length > 0) {
+        const currentMin = hour * 60 + minute;
+        const assignedShift = shifts.reduce((prev, curr) => {
+          const [pHr, pMin] = prev.startTime.split(':').map(Number);
+          const [cHr, cMin] = curr.startTime.split(':').map(Number);
+          return Math.abs(getMinutesDiff(currentMin, cHr * 60 + cMin)) < Math.abs(getMinutesDiff(currentMin, pHr * 60 + pMin)) ? curr : prev;
+        });
+        const [sHr, sMin] = assignedShift.startTime.split(':').map(Number);
+        if (getMinutesDiff(currentMin, sHr * 60 + sMin) > (assignedShift.lateAfterMinutes || 0)) status = 'LATE';
+      }
+    } else {
+      const shifts = await prisma.shift.findMany();
+      if (shifts.length > 0) {
+        const currentMin = hour * 60 + minute;
+        const assignedShift = shifts.reduce((prev, curr) => {
+          const [eHr, eMin] = curr.endTime.split(':').map(Number);
+          const [pHe, pMe] = prev.endTime.split(':').map(Number);
+          return Math.abs(getMinutesDiff(currentMin, eHr * 60 + eMin)) < Math.abs(getMinutesDiff(currentMin, pHe * 60 + pMe)) ? curr : prev;
+        });
+        const [eHr, eMin] = assignedShift.endTime.split(':').map(Number);
+        if (currentMin < (eHr * 60 + eMin)) status = 'EARLY_LEAVE';
+      }
+    }
+
+    const newLog = await prisma.attendanceLog.create({
+      data: {
+        employeeId: bestMatch.id,
+        type,
+        status,
+        confidenceScore: bestScore,
+        checkTime: logTime
+      },
+      include: { employee: { include: { department: true } } }
+    });
+
+    // Gửi thông báo realtime qua Socket.io
+    req.io.emit('attendanceUpdate', {
+      type: type === 'IN' ? 'CHECKIN' : 'CHECKOUT',
+      log: {
+        id: bestMatch.id,
+        employeeCode: bestMatch.employeeCode,
+        name: bestMatch.fullName,
+        role: bestMatch.department.name,
+        time: logTime.toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' }),
+        conf: `${(bestScore * 100).toFixed(1)}%`,
+        status: status,
+        type: type,
+        avatar: bestMatch.avatarUrl
+      }
+    });
+
+    res.json({
+      matched: true,
+      message: `Chào ${bestMatch.fullName}, bạn đã ${type === 'IN' ? 'vào ca' : 'ra ca'} ${status === 'LATE' ? 'TRỄ' : (status === 'EARLY_LEAVE' ? 'SỚM' : 'THÀNH CÔNG')}!`,
+      employee: {
+        id: bestMatch.id,
+        fullName: bestMatch.fullName,
+        employeeCode: bestMatch.employeeCode,
+        department: bestMatch.department.name,
+        avatarUrl: bestMatch.avatarUrl
+      },
+      confidence: +(bestScore * 100).toFixed(1),
+      log: newLog
+    });
+
+  } catch (error) {
+    res.status(500).json({ error: 'Lỗi hệ thống chấm công tự động' });
+  }
+});
+
 // ─────────── FACE IDENTIFY ───────────
 app.post('/api/face/identify', async (req, res) => {
   console.log('🔍 Received identify request...');
   try {
-    const { embedding, livenessScore } = req.body;
+    const { embedding, livenessScore, image_base64 } = req.body; // Added image_base64 here
     if (!embedding || !Array.isArray(embedding)) return res.status(400).json({ error: 'Thiếu embedding vector' });
 
     const employees = await prisma.employee.findMany({
       where: {
         isActive: true,
+        NOT: { faceEmbedding: { equals: [] } } // Chỉ lấy nhân viên đã đăng ký mặt
       },
       include: { department: true }
     });
 
-    // Lọc thủ công các nhân viên đã có embedding để tránh lỗi Prisma type
-    const enrolledEmployees = employees.filter(e => Array.isArray(e.faceEmbedding) && e.faceEmbedding.length > 0);
-
-    if (enrolledEmployees.length === 0) return res.json({ matched: false, message: 'Chưa có nhân viên nào đăng ký khuôn mặt' });
+    if (employees.length === 0) return res.json({ matched: false, message: 'Chưa có nhân viên nào đăng ký khuôn mặt' });
 
     // Kiểm tra chống giả mạo (Liveness Detection)
+    const LIVENESS_THRESHOLD_IDENTIFY = 0.65; // Can be same as AUTO_ATTENDANCE or slightly different
     if (livenessScore !== undefined && livenessScore !== null && livenessScore < 0.65) {
+      // Try to find best match even if liveness fails, to log employeeId if possible
+      let bestMatchForSpoof = null, bestScoreForSpoof = -1;
+      for (const emp of employees) {
+        if (emp.faceEmbedding.length !== embedding.length) continue;
+        const score = cosineSim(embedding, emp.faceEmbedding);
+        if (score > bestScoreForSpoof) { bestScoreForSpoof = score; bestMatchForSpoof = emp; }
+      }
+      const identifiedEmployeeId = (bestScoreForSpoof >= 0.60 && bestMatchForSpoof) ? bestMatchForSpoof.id : null;
+
+      await recordSpoofingAttempt(identifiedEmployeeId, livenessScore, image_base64, req);
       return res.status(403).json({
         matched: false,
         error: 'CẢNH BÁO GIAN LẬN: Phát hiện sử dụng hình ảnh/video giả mạo. Hành động này sẽ được ghi lại vào hệ thống bảo mật.',
@@ -865,15 +1128,9 @@ app.post('/api/face/identify', async (req, res) => {
       });
     }
 
-    const cosineSim = (a, b) => {
-      const dot = a.reduce((s, v, i) => s + v * b[i], 0);
-      const nA = Math.sqrt(a.reduce((s, v) => s + v * v, 0));
-      const nB = Math.sqrt(b.reduce((s, v) => s + v * v, 0));
-      return dot / (nA * nB);
-    };
     let bestMatch = null, bestScore = -1;
     const scores = [];
-    for (const emp of enrolledEmployees) {
+    for (const emp of employees) {
       if (emp.faceEmbedding.length !== embedding.length) {
         console.warn(`⚠️ Mismatch embedding length: Request(${embedding.length}) vs DB(${emp.faceEmbedding.length}) for ${emp.fullName}`);
         continue;
@@ -991,64 +1248,67 @@ app.get('/api/payroll', authMiddleware, async (req, res) => {
     const STANDARD_HOURS = config.standardHours;
 
     const payroll = await Promise.all(employees.map(async emp => {
-      const logs = await prisma.attendanceLog.findMany({
-        where: { employeeId: emp.id, checkTime: { gte: startDate, lte: endDate } },
-        orderBy: { checkTime: 'asc' }
-      });
+      const [logs, leaves] = await Promise.all([
+        prisma.attendanceLog.findMany({
+          where: { employeeId: emp.id, checkTime: { gte: startDate, lte: endDate } },
+          orderBy: { checkTime: 'asc' }
+        }),
+        prisma.leave.findMany({
+          where: { employeeId: emp.id, status: 'APPROVED', from: { lte: endDate }, to: { gte: startDate } }
+        })
+      ]);
 
-      const leaves = await prisma.leave.findMany({
-        where: { employeeId: emp.id, status: 'APPROVED' }
-      });
-      let leaveHours = 0;
-      for (const lv of leaves) {
-        const lvStart = new Date(lv.from);
-        const lvEnd = new Date(lv.to);
-        lvStart.setHours(0, 0, 0, 0);
-        lvEnd.setHours(23, 59, 59, 999);
-        const maxStart = lvStart > startDate ? lvStart : startDate;
-        const minEnd = lvEnd < endDate ? lvEnd : endDate;
-        if (maxStart <= minEnd) {
-          const diffDays = Math.ceil((minEnd - maxStart) / (1000 * 60 * 60 * 24));
-          if (lv.type !== 'Nghỉ không lương') {
-            leaveHours += diffDays * 8;
-          }
-        }
-      }
-
-      let totalWorkHours = 0;
-      let onTime = 0;
-      let late = 0;
-      let daysWorked = 0;
-
+      let rawWorkHours = 0;
+      let onTimeCount = 0;
+      let lateCount = 0;
+      let actualDaysWorked = 0;
       const logsByDay = {};
+
       logs.forEach(l => {
         const dateStr = new Date(l.checkTime).toISOString().split('T')[0];
         if (!logsByDay[dateStr]) logsByDay[dateStr] = [];
         logsByDay[dateStr].push(l);
       });
 
-
       for (const [date, dayLogs] of Object.entries(logsByDay)) {
-        if (dayLogs.some(l => l.type === 'IN')) daysWorked++;
-        const firstIn = dayLogs.find(l => l.type === 'IN');
-        if (firstIn) {
-          if (firstIn.status === 'ON_TIME') onTime++;
-          if (firstIn.status === 'LATE') late++;
+        const ins = dayLogs.filter(l => l.type === 'IN');
+        if (ins.length > 0) {
+          actualDaysWorked++;
+          if (ins[0].status === 'ON_TIME') onTimeCount++;
+          else if (ins[0].status === 'LATE') lateCount++;
         }
 
+        let dayWorkMs = 0;
         let lastIn = null;
-        for (const log of dayLogs) {
-          if (log.type === 'IN') {
-            lastIn = log;
-          } else if (log.type === 'OUT' && lastIn) {
-            const diffMs = new Date(log.checkTime) - new Date(lastIn.checkTime);
-            totalWorkHours += diffMs / 3600000;
+        dayLogs.forEach(log => {
+          if (log.type === 'IN') lastIn = log;
+          else if (log.type === 'OUT' && lastIn) {
+            dayWorkMs += (new Date(log.checkTime) - new Date(lastIn.checkTime));
             lastIn = null;
           }
-        }
+        });
+        rawWorkHours += (dayWorkMs / 3600000);
       }
 
-      // Tạo dữ liệu chi tiết từng ngày cho lịch
+      let leaveHours = 0;
+      leaves.forEach(lv => {
+        const lvStart = new Date(Math.max(new Date(lv.from), startDate));
+        const lvEnd = new Date(minDate(new Date(lv.to), endDate));
+        if (lvStart <= lvEnd && lv.type !== 'Nghỉ không lương') {
+          const diffDays = Math.ceil((lvEnd - lvStart) / (1000 * 60 * 60 * 24)) || 1;
+          leaveHours += diffDays * 8;
+        }
+      });
+
+      const totalPaidHours = +(rawWorkHours + leaveHours).toFixed(2);
+      const otHours = Math.max(0, totalPaidHours - STANDARD_HOURS);
+      const regHours = totalPaidHours - otHours;
+
+      const baseSalary = regHours * HOURLY_RATE;
+      const overtimePay = otHours * HOURLY_RATE * 1.5;
+      const totalSalary = Math.round(baseSalary + overtimePay);
+
+      // Generate calendar detail
       const daysInMonth = new Date(year, month, 0).getDate();
       const dailyDetail = {};
       for (let d = 1; d <= daysInMonth; d++) {
@@ -1058,38 +1318,130 @@ app.get('/api/payroll', authMiddleware, async (req, res) => {
         const lastOut = [...dayLogs].reverse().find(l => l.type === 'OUT');
 
         if (firstIn) {
-          dailyDetail[dateStr] = {
-            status: firstIn.status,
-            checkIn: firstIn.checkTime,
-            checkOut: lastOut && lastOut.id !== firstIn.id ? lastOut.checkTime : null
-          };
+          dailyDetail[dateStr] = { status: firstIn.status, checkIn: firstIn.checkTime, checkOut: lastOut?.id !== firstIn.id ? lastOut?.checkTime : null };
         } else {
           const dayOfWeek = new Date(year, month - 1, d).getDay();
-          dailyDetail[dateStr] = {
-            status: (dayOfWeek === 0 || dayOfWeek === 6) ? 'WEEKEND' : 'ABSENT',
-            checkIn: null,
-            checkOut: null
-          };
+          const hasLeave = leaves.some(lv => new Date(lv.from) <= new Date(dateStr) && new Date(lv.to) >= new Date(dateStr));
+          dailyDetail[dateStr] = { status: hasLeave ? 'ON_TIME' : (dayOfWeek === 0 || dayOfWeek === 6) ? 'WEEKEND' : 'ABSENT' };
         }
       }
-
-      const standardHours = +(totalWorkHours + leaveHours).toFixed(2);
-      const overtimeHours = Math.max(0, standardHours - STANDARD_HOURS);
-      const baseSalary = standardHours * HOURLY_RATE;
-      const overtimePay = overtimeHours * HOURLY_RATE * 1.5;
-      const totalSalary = Math.round(baseSalary + overtimePay);
 
       return {
         id: emp.id, employeeCode: emp.employeeCode, fullName: emp.fullName,
         department: emp.department.name, avatarUrl: emp.avatarUrl,
-        daysWorked: daysWorked + (leaveHours / 8), onTime, late, dailyDetail, standardHours, overtimeHours: +overtimeHours.toFixed(2),
-        baseSalary: Math.round(baseSalary), overtimePay: Math.round(overtimePay), totalSalary
+        daysWorked: actualDaysWorked + (leaveHours / 8), onTime: onTimeCount, late: lateCount, dailyDetail,
+        standardHours: +regHours.toFixed(2), overtimeHours: +otHours.toFixed(2),
+        baseSalary: Math.round(baseSalary), totalSalary
       };
     }));
     res.json({ month: +month, year: +year, payroll });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Lỗi tính bảng lương' });
+  }
+});
+
+app.get('/api/payroll/export', adminAuth, async (req, res) => {
+  try {
+    const { month = new Date().getMonth() + 1, year = new Date().getFullYear() } = req.query;
+    const startDate = new Date(year, month - 1, 1);
+    const endDate = new Date(year, month, 0, 23, 59, 59);
+
+    const employees = await prisma.employee.findMany({
+      where: { isActive: true },
+      include: { department: true }
+    });
+
+    let config = await prisma.systemConfig.findFirst();
+    if (!config) config = await prisma.systemConfig.create({ data: {} });
+    const HOURLY_RATE = config.hourlyRate;
+    const STANDARD_HOURS = config.standardHours;
+
+    const payrollData = await Promise.all(employees.map(async emp => {
+      const [logs, leaves] = await Promise.all([
+        prisma.attendanceLog.findMany({
+          where: { employeeId: emp.id, checkTime: { gte: startDate, lte: endDate } },
+          orderBy: { checkTime: 'asc' }
+        }),
+        prisma.leave.findMany({
+          where: { employeeId: emp.id, status: 'APPROVED', from: { lte: endDate }, to: { gte: startDate } }
+        })
+      ]);
+
+      let rawWorkHours = 0;
+      let actualDaysWorked = 0;
+      const logsByDay = {};
+      logs.forEach(l => {
+        const d = new Date(l.checkTime).toISOString().split('T')[0];
+        if (!logsByDay[d]) logsByDay[d] = [];
+        logsByDay[d].push(l);
+      });
+
+      for (const dayLogs of Object.values(logsByDay)) {
+        if (dayLogs.some(l => l.type === 'IN')) actualDaysWorked++;
+        let dayWorkMs = 0, lastIn = null;
+        dayLogs.forEach(log => {
+          if (log.type === 'IN') lastIn = log;
+          else if (log.type === 'OUT' && lastIn) {
+            dayWorkMs += (new Date(log.checkTime) - new Date(lastIn.checkTime));
+            lastIn = null;
+          }
+        });
+        rawWorkHours += (dayWorkMs / 3600000);
+      }
+
+      let leaveHours = 0;
+      leaves.forEach(lv => {
+        const lvStart = new Date(Math.max(new Date(lv.from), startDate));
+        const lvEnd = new Date(minDate(new Date(lv.to), endDate));
+        if (lvStart <= lvEnd && lv.type !== 'Nghỉ không lương') {
+          const diffDays = Math.ceil((lvEnd - lvStart) / (1000 * 60 * 60 * 24)) || 1;
+          leaveHours += diffDays * 8;
+        }
+      });
+
+      const totalPaidHours = +(rawWorkHours + leaveHours).toFixed(2);
+      const otHours = Math.max(0, totalPaidHours - STANDARD_HOURS);
+      const regHours = totalPaidHours - otHours;
+      const baseSalary = regHours * HOURLY_RATE;
+      const overtimePay = otHours * HOURLY_RATE * 1.5;
+
+      return {
+        employeeCode: emp.employeeCode,
+        fullName: emp.fullName,
+        department: emp.department.name,
+        daysWorked: actualDaysWorked + (leaveHours / 8),
+        standardHours: +regHours.toFixed(2),
+        overtimeHours: +otHours.toFixed(2),
+        baseSalary: Math.round(baseSalary),
+        totalSalary: Math.round(baseSalary + overtimePay)
+      };
+    }));
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet(`Bảng lương ${month}-${year}`);
+    worksheet.columns = [
+      { header: 'Mã NV', key: 'employeeCode', width: 15 },
+      { header: 'Họ Tên', key: 'fullName', width: 25 },
+      { header: 'Phòng Ban', key: 'department', width: 20 },
+      { header: 'Công (Ngày)', key: 'daysWorked', width: 15 },
+      { header: 'Giờ Chuẩn', key: 'standardHours', width: 15 },
+      { header: 'Giờ OT', key: 'overtimeHours', width: 15 },
+      { header: 'Lương CB (VNĐ)', key: 'baseSalary', width: 20 },
+      { header: 'Tổng Lương (VNĐ)', key: 'totalSalary', width: 20 },
+    ];
+
+    worksheet.getRow(1).font = { bold: true };
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0E0E0' } };
+    payrollData.forEach(data => worksheet.addRow(data));
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename=BangLuong_${month}_${year}.xlsx`);
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Lỗi xuất file Excel' });
   }
 });
 
@@ -1320,14 +1672,6 @@ app.put('/api/portal/update-face', employeeAuth, async (req, res) => {
     const { faceEmbedding } = req.body;
     if (!faceEmbedding || !Array.isArray(faceEmbedding)) return res.status(400).json({ error: 'Thiếu dữ liệu khuôn mặt' });
 
-    // Hàm tính cosine similarity
-    const cosineSim = (a, b) => {
-      const dot = a.reduce((s, v, i) => s + v * b[i], 0);
-      const nA = Math.sqrt(a.reduce((s, v) => s + v * v, 0));
-      const nB = Math.sqrt(b.reduce((s, v) => s + v * v, 0));
-      return dot / (nA * nB);
-    };
-
     // Lấy thông tin nhân viên hiện tại
     const currentEmp = await prisma.employee.findUnique({ where: { id: req.employeeId } });
     if (!currentEmp) return res.status(404).json({ error: 'Không tìm thấy nhân viên' });
@@ -1497,12 +1841,12 @@ app.put('/api/exceptions/:id/approve', adminAuth, async (req, res) => {
       for (const s of shifts) {
         const [sh, sm] = s.startTime.split(':').map(Number);
         const sMin = sh * 60 + sm;
-        let diff = Math.abs(currentMin - sMin);
+        let diff = Math.abs(getMinutesDiff(currentMin, sMin));
         if (diff < minDiff) { minDiff = diff; closestShift = s; }
       }
       const [sh, sm] = closestShift.startTime.split(':').map(Number);
       const allowedLate = closestShift.lateAfterMinutes || 0;
-      const delay = currentMin - (sh * 60 + sm);
+      const delay = getMinutesDiff(currentMin, sh * 60 + sm);
       if (delay > allowedLate) isLate = true;
     }
 
@@ -1550,9 +1894,7 @@ app.get('/api/reports/manual-on-time', adminAuth, async (req, res) => {
       shifts.forEach(s => {
         const [sh, sm] = s.startTime.split(':').map(Number);
         const sMin = sh * 60 + sm;
-        let diff = logMin - sMin;
-        if (diff > 720) diff -= 1440;
-        else if (diff < -720) diff += 1440;
+        let diff = getMinutesDiff(logMin, sMin);
         if (Math.abs(diff) < minDiff) {
           minDiff = Math.abs(diff);
           closestShift = s;
@@ -1563,9 +1905,7 @@ app.get('/api/reports/manual-on-time', adminAuth, async (req, res) => {
 
       const [sh, sm] = closestShift.startTime.split(':').map(Number);
       const sMin = sh * 60 + sm;
-      let delay = logMin - sMin;
-      if (delay > 720) delay -= 1440;
-      else if (delay < -720) delay += 1440;
+      let delay = getMinutesDiff(logMin, sMin);
 
       if (delay > (closestShift.lateAfterMinutes || 0)) {
         return {
@@ -1595,6 +1935,31 @@ app.get('/api/reports/manual-on-time', adminAuth, async (req, res) => {
     res.json(Object.values(summary).sort((a, b) => b.count - a.count));
   } catch (err) { res.status(500).json({ error: 'Lỗi tạo báo cáo' }); }
 });
+
+// ─────────── REPORTS - SPOOFING ATTEMPTS ───────────
+app.get('/api/reports/spoofing-attempts', adminAuth, async (req, res) => {
+  try {
+    const { startDate, endDate, employeeId, status } = req.query;
+    const where = {};
+
+    if (startDate) where.timestamp = { gte: new Date(startDate) };
+    if (endDate) where.timestamp = { ...where.timestamp, lte: new Date(endDate) };
+    if (employeeId) where.employeeId = employeeId;
+    if (status) where.status = status;
+
+    const spoofingAttempts = await prisma.spoofingAttempt.findMany({
+      where,
+      include: { employee: { select: { fullName: true, employeeCode: true, avatarUrl: true } } },
+      orderBy: { timestamp: 'desc' },
+    });
+
+    res.json(spoofingAttempts);
+  } catch (error) {
+    console.error('Error fetching spoofing attempts report:', error);
+    res.status(500).json({ error: 'Lỗi khi lấy báo cáo gian lận' });
+  }
+});
+
 
 // ─────────── CONFIG (System Settings) ───────────
 app.get('/api/config', adminAuth, async (req, res) => {

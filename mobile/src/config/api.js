@@ -2,7 +2,7 @@
 
 // URL này sẽ được script tự động cập nhật khi bạn chạy tunnel.
 // Nếu chạy thủ công, hãy dán URL .trycloudflare.com vào đây.
-export const BACKEND_URL = `https://emacs-herbs-kong-dublin.trycloudflare.com`; 
+export const BACKEND_URL = `https://clean-shoppers-coupons-impressive.trycloudflare.com`; 
 export const AI_SERVICE_URL = BACKEND_URL; // Dùng chung URL với Backend (Proxy)
 
 export const LT_HEADERS = { 

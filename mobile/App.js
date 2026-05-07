@@ -49,17 +49,17 @@ export default function App() {
       const voices = await Speech.getAvailableVoicesAsync();
       const vnVoices = voices.filter(v => v.language.includes('vi'));
 
-      // Tìm giọng Nam (Ưu tiên các tên giọng nam phổ biến trên Android/iOS)
-      const maleVoice = vnVoices.find(v =>
-        v.name.toLowerCase().includes('minh') ||
-        v.name.toLowerCase().includes('nam') ||
-        v.name.toLowerCase().includes('an') ||
-        v.name.toLowerCase().includes('mạnh') ||
-        v.name.toLowerCase().includes('male')
+      // Tìm giọng Nữ (Ưu tiên các tên giọng nữ phổ biến: Lan, Linh, Hương, Mai, Female)
+      const femaleVoice = vnVoices.find(v =>
+        v.name.toLowerCase().includes('lan') ||
+        v.name.toLowerCase().includes('linh') ||
+        v.name.toLowerCase().includes('hương') ||
+        v.name.toLowerCase().includes('mai') ||
+        v.name.toLowerCase().includes('female')
       ) || vnVoices[0];
 
-      if (maleVoice) {
-        setSelectedVoice(maleVoice.identifier);
+      if (femaleVoice) {
+        setSelectedVoice(femaleVoice.identifier);
       }
     } catch (e) {
       console.log('Voice setup log:', e.message);
@@ -142,7 +142,7 @@ export default function App() {
     Speech.stop();
     Speech.speak(text, {
       language: 'vi-VN',
-      pitch: 0.9,  // Hạ cao độ xuống một chút để giọng trầm hơn (giọng Nam)
+      pitch: 1.1,  // Tăng cao độ lên một chút để giọng thanh hơn (giọng Nữ)
       rate: 1.0,
       voice: selectedVoice,
     });
@@ -234,7 +234,8 @@ export default function App() {
       const idRes = await axios.post(`${BACKEND_URL}/api/face/identify`,
         {
           embedding: aiRes.data.embedding,
-          livenessScore: 0.99
+          livenessScore: 0.99, // Assuming liveness was checked on client side, or a high score is passed
+          image_base64: capturedImg // Pass the image for potential server-side spoofing logging
         },
         { headers: LT_HEADERS, timeout: API_TIMEOUT }
       );
@@ -283,18 +284,120 @@ export default function App() {
     }
   };
 
-
-  const handleEnrollment = async () => {
-    if (!cameraRef.current || !selectedEmployee || loading) return;
-
+  // CHỨC NĂNG QUÉT NHANH (QUY TRÌNH MỚI)
+  const handleQuickAttendance = async () => {
+    if (!cameraRef.current || loading) return;
     setLoading(true);
     setResult(null);
+    setStatus('Đang quét khuôn mặt...');
+    speak('Vui lòng đưa mặt vào khung hình để điểm danh');
 
+    // Delay một chút để nhân viên ổn định vị trí
+    await new Promise(r => setTimeout(r, 500));
+
+    try {
+      const photo = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.7 });
+
+      // Gọi API tự động nhận diện và đối soát
+      const res = await axios.post(`${BACKEND_URL}/api/face/auto-attendance`, {
+        image_base64: photo.base64,
+        type: checkType
+      }, { headers: LT_HEADERS, timeout: 30000 });
+
+      if (!res.data.matched) {
+        throw new Error(res.data.message || 'Không nhận diện được nhân viên');
+      }
+
+      const employee = res.data.employee;
+      const msg = res.data.message;
+
+      setResult({ type: 'success', message: msg, time: res.data.log?.checkTime, employee });
+      speak(msg);
+    } catch (error) {
+      let errorMsg = error.response?.data?.error || error.message;
+      const isSpoofing = error.response?.data?.isSpoofing;
+
+      setResult({ type: 'error', message: isSpoofing ? '❌ PHÁT HIỆN GIAN LẬN' : errorMsg });
+      if (isSpoofing) speak('Cảnh báo, phát hiện giả mạo khuôn mặt');
+      speak(errorMsg);
+    } finally {
+      setLoading(false);
+      setStatus('Sẵn sàng');
+    }
+  };
+
+  // CHỨC NĂNG ĐĂNG KÝ KHUÔN MẶT MỚI BẰNG CÁCH QUAY ĐẦU (THAY THẾ LIVENESS 3 BƯỚC CŨ)
+  const handleHeadRotationEnroll = async () => {
+    if (!cameraRef.current || !selectedEmployee || loading) return;
+    setLoading(true);
+    setResult(null);
+    const capturedImagesForEnrollment = [];
+    speak('Bắt đầu quy trình quét khuôn mặt video. Hãy nhìn thẳng vào camera.');
+
+    try {
+      const targetEmp = employees.find(e => e.id === selectedEmployee);
+      const employeeName = targetEmp?.fullName || 'nhân viên';
+
+      // Bước 1: Nhìn thẳng
+      setStatus(`[1/3] Nhìn thẳng`);
+      speak(`Vui lòng nhìn thẳng vào camera`);
+      await new Promise(r => setTimeout(r, 2000)); // Cho người dùng ổn định
+      const imgCenter = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.8 });
+      capturedImagesForEnrollment.push(imgCenter.base64);
+
+      // Bước 2: Nghiêng đầu sang trái
+      setStatus(`[2/3] Quay sang TRÁI`);
+      speak('Tuyệt vời, bây giờ hãy quay mặt sang bên trái');
+      await new Promise(r => setTimeout(r, 2000));
+      const imgLeft = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.8 });
+      capturedImagesForEnrollment.push(imgLeft.base64);
+
+      // Bước 3: Nghiêng đầu sang phải
+      setStatus(`[3/3] Quay sang PHẢI`);
+      speak('Tốt lắm, cuối cùng hãy quay mặt sang bên phải');
+      await new Promise(r => setTimeout(r, 2000));
+      const imgRight = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.8 });
+      capturedImagesForEnrollment.push(imgRight.base64);
+
+      setStatus('Đã chụp đủ ảnh. Đang xử lý và lưu khuôn mặt...');
+      speak('Đã chụp đủ ảnh. Đang xử lý và lưu khuôn mặt.');
+
+      // Gửi mảng ảnh lên Backend để xử lý đa góc độ
+      const res = await axios.post(`${BACKEND_URL}/api/face/enroll-multi-images`, {
+        employeeId: selectedEmployee,
+        images_base64: capturedImagesForEnrollment // Gửi mảng ảnh
+      }, {
+        headers: { Authorization: `Bearer ${adminToken}`, ...LT_HEADERS },
+        timeout: 30000
+      });
+
+      const successMsg = `Đã quét và lưu khuôn mặt mới thành công cho ${employeeName}!`;
+      setResult({ type: 'success', message: successMsg });
+      speak(successMsg);
+      fetchEmployees();
+    } catch (error) {
+      const errorMsg = error.response?.data?.error || error.message || 'Lỗi khi đăng ký khuôn mặt';
+      setResult({ type: 'error', message: errorMsg });
+      speak(`Đăng ký thất bại: ${errorMsg}`);
+      console.error('Head Rotation Enroll Error:', error);
+    } finally {
+      setLoading(false);
+      setStatus('Sẵn sàng');
+    }
+  };
+
+  // Giữ lại hàm handleEnrollment cũ nếu muốn có tùy chọn liveness 3 bước,
+  // nhưng sẽ không gọi nó từ nút chính nữa.
+  // Nếu muốn loại bỏ hoàn toàn, có thể xóa hàm này.
+  const handleEnrollmentOldLiveness = async () => { // Renamed for clarity
+    if (!cameraRef.current || !selectedEmployee || loading) return;
+    setLoading(true);
+    setResult(null);
     try {
       // BƯỚC 1: NHÌN THẲNG (3 GIÂY)
       setLivenessStep(1);
-      const emp = employees.find(e => e.id === selectedEmployee);
-      const msg1 = `Bắt đầu đăng ký cho ${emp?.name || 'nhân viên'}. Bước 1: Nhìn thẳng 2 giây.`;
+      const targetEmp = employees.find(e => e.id === selectedEmployee);
+      const msg1 = `Bắt đầu đăng ký cho ${targetEmp?.name || 'nhân viên'}. Bước 1: Nhìn thẳng 2 giây.`;
       setStatus(msg1);
       speak(msg1);
       await new Promise(r => setTimeout(r, 2000));
@@ -359,7 +462,7 @@ export default function App() {
         }
       });
 
-      const successMsg = `Đã cập nhật khuôn mặt thành công cho ${selectedEmployee.fullName}`;
+      const successMsg = `Đã cập nhật khuôn mặt thành công cho ${targetEmp?.name || 'nhân viên'}`;
       setResult({ type: 'success', message: successMsg });
       speak(successMsg);
       fetchEmployees(); // Refresh list
@@ -481,14 +584,22 @@ export default function App() {
 
             {result && livenessStep === 0 && (
               <View style={[styles.resultBox, result.type === 'success' ? styles.resultSuccess : styles.resultError]}>
+                {result.employee && (
+                  <View style={{ alignItems: 'center', marginBottom: 5 }}>
+                    <Text style={[styles.resultText, { fontSize: 18, color: '#fbbf24' }]}>
+                      {result.employee.fullName}
+                    </Text>
+                    <Text style={{ color: '#e2e8f0', fontSize: 13 }}>{result.employee.department}</Text>
+                  </View>
+                )}
                 <Text style={styles.resultText}>{result.message}</Text>
-                {result.time && <Text style={styles.timeText}>Thời gian: {new Date(result.time).toLocaleTimeString('vi-VN')}</Text>}
+                {result.time && <Text style={styles.timeText}>Vào ca: {new Date(result.time).toLocaleString('vi-VN')}</Text>}
               </View>
             )}
 
             <TouchableOpacity
-              style={[styles.captureButton, isAdmin && styles.enrollButton, livenessStep > 0 && styles.captureButtonDisabled]}
-              onPress={isAdmin ? handleEnrollment : handleAttendance}
+              style={[styles.captureButton, isAdmin && styles.enrollButton]}
+              onPress={isAdmin ? handleHeadRotationEnroll : handleQuickAttendance} // Changed to new enrollment
               disabled={livenessStep > 0}
             >
               <View style={[styles.captureButtonInner, isAdmin && styles.enrollButtonInner, livenessStep > 0 && { backgroundColor: '#ccc' }]} />

@@ -1,0 +1,194 @@
+
+> frontend@0.0.0 lint
+> eslint .
+
+
+D:\facecheck-main\frontend\src\App.jsx
+  14:8  error  'EmployeeDashboard' is defined but never used  no-unused-vars
+
+D:\facecheck-main\frontend\src\components\AddEmployeeModal.jsx
+    4:13  error    'Camera' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 no-unused-vars
+    4:32  error    'UploadCloud' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            no-unused-vars
+    8:7   error    'AI_SERVICE_BASE_URL' is assigned a value but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           no-unused-vars
+   43:7   error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+  41 |         .catch(err => console.error(err));
+  42 |     } else {
+> 43 |       setStep(1);
+     |       ^^^^^^^ Avoid calling setState() directly within an effect
+  44 |       setFormData({ employeeCode: '', fullName: '', email: '', phone: '', departmentId: '' });
+  45 |       setFaceEmbedding(null);
+  46 |       setError(null);  react-hooks/set-state-in-effect
+   56:7   error    Error: Cannot access variable before it is declared
+
+`startLivenessChallenge` is accessed before it is declared, which prevents the earlier access from updating when this value changes over time.
+
+  54 |   const capture = useCallback(async () => {
+  55 |     if (!challengePassed) {
+> 56 |       startLivenessChallenge();
+     |       ^^^^^^^^^^^^^^^^^^^^^^ `startLivenessChallenge` accessed before it is declared
+  57 |       return;
+  58 |     }
+  59 |
+
+   89 |   }, [challengePassed, capture]);
+   90 |
+>  91 |   const startLivenessChallenge = async () => {
+      |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+>  92 |     setIsVerifying(true);
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^
+>  93 |     setChallengePassed(false);
+      …
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^
+> 148 |     runStep();
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^
+> 149 |   };
+      | ^^^^^ `startLivenessChallenge` is declared here
+  150 |
+  151 |   const handleSubmit = async () => {
+  152 |     if (!faceEmbedding) {                                                  react-hooks/immutability
+   83:6   warning  React Hook useCallback has a missing dependency: 'startLivenessChallenge'. Either include it or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        react-hooks/exhaustive-deps
+  144:18  error    'err' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    no-unused-vars
+  144:23  error    Empty block statement                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              no-empty
+
+D:\facecheck-main\frontend\src\components\EditEmployeeModal.jsx
+  15:7  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+  13 |   useEffect(() => {
+  14 |     if (employee) {
+> 15 |       setFormData({
+     |       ^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  16 |         employeeCode: employee.employeeCode || '',
+  17 |         fullName: employee.name || '',
+  18 |         email: employee.email || '',  react-hooks/set-state-in-effect
+
+D:\facecheck-main\frontend\src\pages\AIConfig.jsx
+    5:11  error  'RefreshCw' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  no-unused-vars
+    5:22  error  'ShieldCheck' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                no-unused-vars
+    6:16  error  'Mail' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       no-unused-vars
+    6:22  error  'Phone' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      no-unused-vars
+    6:29  error  'Building2' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  no-unused-vars
+    6:40  error  'BadgeCheck' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 no-unused-vars
+   70:5   error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+  68 |
+  69 |   useEffect(() => {
+> 70 |     fetchRecentLogs();
+     |     ^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  71 |   }, [fetchRecentLogs]);
+  72 |
+  73 |   const resetAll = useCallback(() => {  react-hooks/set-state-in-effect
+  241:15  error  Empty block statement                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  no-empty
+
+D:\facecheck-main\frontend\src\pages\Attendance.jsx
+  72:20  error  Compilation Skipped: Existing memoization could not be preserved
+
+React Compiler has skipped optimizing this component because the existing manual memoization could not be preserved. This value was memoized in source but not in compilation output.
+
+  70 |   };
+  71 |
+> 72 |   const filtered = useMemo(() => {
+     |                    ^^^^^^^^^^^^^^^
+> 73 |     if (!filterStatus) return attendanceLogs;
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 74 |     return attendanceLogs.filter(l => filterStatus === 'present' ? l.status === 'Present' : l.status !== 'Present');
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 75 |   }, [attendanceLogs, filterStatus]);
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Could not preserve existing memoization
+  76 |
+  77 |   const totalPages = Math.ceil(filtered.length / ITEMS_PER_PAGE);
+  78 |   const paginated = filtered.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);  react-hooks/preserve-manual-memoization
+
+D:\facecheck-main\frontend\src\pages\EmployeeProfileConfig.jsx
+  5:100  error  'LogIn' is defined but never used   no-unused-vars
+  5:107  error  'LogOut' is defined but never used  no-unused-vars
+
+D:\facecheck-main\frontend\src\pages\Exceptions.jsx
+  113:5  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+  111 |
+  112 |   useEffect(() => {
+> 113 |     fetchExceptions();
+      |     ^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  114 |   }, [fetchExceptions]);
+  115 |
+  116 |   const handleApprove = async (id) => {  react-hooks/set-state-in-effect
+
+D:\facecheck-main\frontend\src\pages\Leaves.jsx
+  119:5  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+  117 |
+  118 |   useEffect(() => {
+> 119 |     fetchLeaves();
+      |     ^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  120 |   }, [fetchLeaves]);
+  121 |
+  122 |   const handleApprove = async (id) => {  react-hooks/set-state-in-effect
+
+D:\facecheck-main\frontend\src\pages\Notifications.jsx
+  85:5  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+  83 |
+  84 |   useEffect(() => {
+> 85 |     fetchNotifications();
+     |     ^^^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  86 |   }, [fetchNotifications]);
+  87 |
+  88 |   const handleDelete = async (id) => {  react-hooks/set-state-in-effect
+
+D:\facecheck-main\frontend\src\pages\Payroll.jsx
+   3:10  error  'Download' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     no-unused-vars
+  34:5   error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+  32 |
+  33 |   useEffect(() => {
+> 34 |     fetchPayroll();
+     |     ^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  35 |   }, [fetchPayroll]);
+  36 |
+  37 |   const prevMonth = () => { if (month === 1) { setMonth(12); setYear(y => y - 1); } else setMonth(m => m - 1); };  react-hooks/set-state-in-effect
+
+✖ 26 problems (25 errors, 1 warning)
+
